@@ -130,7 +130,6 @@ with st.sidebar.form("log_form"):
     with col_r:
         reps = st.number_input("Reps", min_value=0, step=1, value=10)
     with col_s:
-    with col_s:
         set_num = st.number_input("Set #", min_value=1, step=1, value=1)
         
     rpe = st.number_input("RPE (1-10)", min_value=0.0, max_value=10.0, step=0.5, value=8.0)
