@@ -112,12 +112,22 @@ else:
 # --- Sidebar: Input Form ---
 st.sidebar.header("📝 Log Workout")
 
-with st.sidebar.form("log_form"):
-    # Date
-    date_val = st.date_input("Date", datetime.date.today())
+    # --- Interactive Selection (Outside Form) ---
+    # Muscle Filter
+    muscle_groups_input = sorted(df_master['target_muscle_group'].dropna().unique().tolist()) if 'target_muscle_group' in df_master.columns else []
+    selected_muscle_input = st.sidebar.selectbox("Filter Muscle", ["All"] + muscle_groups_input)
     
-    # Exercise
-    selected_exercise = st.selectbox("Exercise", exercise_options)
+    # Filter Options
+    filtered_options = exercise_options
+    if selected_muscle_input != "All":
+        filtered_options = [ex for ex in exercise_options if exercise_map.get(ex, {}).get('target_muscle_group') == selected_muscle_input]
+    
+    # Exercise Selector
+    selected_exercise = st.sidebar.selectbox("Exercise", filtered_options)
+    
+    with st.sidebar.form("log_form"):
+        # Date
+        date_val = st.date_input("Date", datetime.date.today())
     
     # Stats
     col_w, col_u = st.columns([2, 1])
