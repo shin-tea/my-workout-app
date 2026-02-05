@@ -220,7 +220,26 @@ if not df_log.empty:
     # Filter by Exercise
     unique_exercises = sorted(df_log['Exercise'].astype(str).unique().tolist())
     
-    # Default selection: most recently logged exercise
+    # --- Muscle Group Filter ---
+    # Get distinct muscle groups from Master
+    if 'target_muscle_group' in df_master.columns:
+        muscle_groups = sorted(df_master['target_muscle_group'].dropna().unique().tolist())
+        selected_muscle = st.selectbox("Filter by Muscle Group", ["All"] + muscle_groups)
+        
+        if selected_muscle != "All":
+            # Filter exercises that belong to the selected muscle group
+            # We use exercise_map which maps exercise name -> info dict
+            filtered_exercises = []
+            for ex in unique_exercises:
+                # Get muscle group for this logged exercise
+                # Note: exercise_map keys are exercise names
+                info = exercise_map.get(ex)
+                if info and info.get('target_muscle_group') == selected_muscle:
+                    filtered_exercises.append(ex)
+            unique_exercises = filtered_exercises
+    # ---------------------------
+
+    # Default selection: most recently logged exercise (if in list)
     default_idx = 0
     if not df_log.empty:
         last_ex = df_log.iloc[-1]['Exercise']
