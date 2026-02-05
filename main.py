@@ -93,7 +93,8 @@ if df_master.empty or df_constants.empty:
 # 1. Constants Map
 # Structure: Category | Value
 try:
-    set_types = df_constants[df_constants['Category'] == 'SetType']['Value'].dropna().unique().tolist()
+    set_types_raw = df_constants[df_constants['Category'] == 'SetType']['Value'].dropna().unique().tolist()
+    set_types = [""] + set_types_raw
     units = df_constants[df_constants['Category'] == 'Unit']['Value'].dropna().unique().tolist()
 except KeyError:
     st.error("Constants sheet missing required 'Category' or 'Value' columns.")
