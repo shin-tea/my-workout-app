@@ -130,7 +130,8 @@ with st.sidebar.form("log_form"):
     with col_r:
         reps = st.number_input("Reps", min_value=0, step=1, value=10)
     with col_s:
-        sets = st.number_input("Sets", min_value=1, step=1, value=3)
+    with col_s:
+        set_num = st.number_input("Set #", min_value=1, step=1, value=1)
         
     rpe = st.number_input("RPE (1-10)", min_value=0.0, max_value=10.0, step=0.5, value=8.0)
     set_type = st.selectbox("Set Type", set_types, index=0 if 'Main' in set_types else 0)
@@ -151,23 +152,22 @@ if submitted:
         start_id = df_log['ID'].max() + 1
     
     # 4. Create Rows
-    new_rows = []
-    for i in range(sets):
-        row = {
-            "ID": int(start_id + i),
-            "Date": date_val.strftime("%Y-%m-%d"),
-            "ExerciseID": ex_id,
-            "Target": target_muscle,
-            "Exercise": selected_exercise,
-            "Set #": int(i + 1),
-            "Weight": float(weight),
-            "Unit": unit,
-            "Reps": int(reps),
-            "RPE": float(rpe),
-            "Set Type": set_type,
-            "Memo": memo
-        }
-        new_rows.append(row)
+    # Single record per click
+    row = {
+        "ID": int(start_id),
+        "Date": date_val.strftime("%Y-%m-%d"),
+        "ExerciseID": ex_id,
+        "Target": target_muscle,
+        "Exercise": selected_exercise,
+        "Set #": int(set_num),
+        "Weight": float(weight),
+        "Unit": unit,
+        "Reps": int(reps),
+        "RPE": float(rpe),
+        "Set Type": set_type,
+        "Memo": memo
+    }
+    new_rows = [row]
     
     # 5. Append to GSheet
     try:
@@ -194,7 +194,7 @@ if submitted:
             
         ws_log.append_rows(rows_to_append)
         
-        st.success(f"Running: Added {sets} sets of {selected_exercise}!")
+        st.success(f"Running: Added Set #{set_num} of {selected_exercise}!")
         st.cache_data.clear()
         st.rerun()
     except Exception as e:
