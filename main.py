@@ -139,19 +139,7 @@ with st.sidebar.form("log_form"):
     submitted = st.form_submit_button("Add Log", type="primary")
 
 if submitted:
-    # 1. Calculations
-    weight_kg = weight
-    if unit == 'lbs':
-        weight_kg = weight * 0.453592
-    
-    # Epley Formula: 1RM = Weight * (1 + Reps/30)
-    estimated_1rm = 0.0
-    if reps > 0:
-        estimated_1rm = weight_kg * (1 + reps / 30.0)
-    else:
-        estimated_1rm = 0.0
-
-    # 2. Get Metadata
+    # 1. Get Metadata
     ex_info = exercise_map.get(selected_exercise, {})
     ex_id = ex_info.get('exercise_id', '')
     target_muscle = ex_info.get('target_muscle_group', '')
@@ -177,9 +165,7 @@ if submitted:
             "Reps": int(reps),
             "RPE": float(rpe),
             "Set Type": set_type,
-            "Memo": memo,
-            "Weight (kg)": round(weight_kg, 2),
-            "Estimated 1RM (kg)": round(estimated_1rm, 2)
+            "Memo": memo
         }
         new_rows.append(row)
     
@@ -199,7 +185,7 @@ if submitted:
             headers = df_log.columns.tolist()
         else:
             # Fallback to the known structure if sheet is empty
-            headers = ["ID", "Date", "ExerciseID", "Target", "Exercise", "Set #", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo", "Weight (kg)", "Estimated 1RM (kg)"]
+            headers = ["ID", "Date", "ExerciseID", "Target", "Exercise", "Set #", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"]
             
         rows_to_append = []
         for row_dict in new_rows:
@@ -221,6 +207,15 @@ st.subheader("📊 Progress Dashboard")
 if not df_log.empty:
     # Correct Types for display/plotting
     df_log['Date'] = pd.to_datetime(df_log['Date'], errors='coerce')
+    df_log['Weight'] = pd.to_numeric(df_log['Weight'], errors='coerce').fillna(0)
+    df_log['Reps'] = pd.to_numeric(df_log['Reps'], errors='coerce').fillna(0)
+
+    # Calculate Derived Columns
+    df_log['Weight (kg)'] = df_log.apply(
+        lambda x: x['Weight'] * 0.453592 if str(x.get('Unit', '')).lower() == 'lbs' else x['Weight'], 
+        axis=1
+    )
+    df_log['Estimated 1RM (kg)'] = df_log['Weight (kg)'] * (1 + df_log['Reps'] / 30.0)
     
     # Filter by Exercise
     unique_exercises = sorted(df_log['Exercise'].astype(str).unique().tolist())
