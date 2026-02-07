@@ -20,6 +20,19 @@ SCOPES = [
 st.set_page_config(page_title="Workout Tracker", layout="wide", page_icon="💪")
 st.title("🏋️ Workout Tracker")
 
+# --- Global CSS to disable selectbox search (prevents mobile keyboard) ---
+st.markdown(
+    """
+    <style>
+    /* Disable search input in selectboxes to prevent mobile keyboard from popping up */
+    .stSelectbox div[data-baseweb="select"] input {
+        pointer-events: none;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 # --- Success Message Logic ---
 if 'success_msg' in st.session_state and st.session_state['success_msg']:
     st.success(st.session_state['success_msg'])
