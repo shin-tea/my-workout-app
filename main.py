@@ -20,13 +20,14 @@ SCOPES = [
 st.set_page_config(page_title="Workout Tracker", layout="wide", page_icon="💪")
 st.title("🏋️ Workout Tracker")
 
-# --- Global CSS to disable selectbox search (prevents mobile keyboard) ---
+# --- Global CSS for UI Polish ---
 st.markdown(
     """
     <style>
-    /* Hide search input in selectboxes to prevent mobile keyboard from popping up */
-    .stSelectbox div[data-baseweb="select"] input {
-        display: none !important;
+    /* Make radio buttons more compact in the sidebar */
+    [data-testid="stSidebar"] .stRadio label {
+        padding-top: 2px !important;
+        padding-bottom: 2px !important;
     }
     </style>
     """,
@@ -211,7 +212,7 @@ if using_template and exercise_ids_in_template:
             current_idx = 0
             st.session_state['template_current_idx'] = 0
         
-        selected_exercise = st.sidebar.selectbox(
+        selected_exercise = st.sidebar.radio(
             "Exercise (Template Order)", 
             template_exercise_names, 
             index=current_idx,
@@ -232,8 +233,8 @@ else:
     if selected_muscle_input != "All":
         filtered_options = [ex for ex in exercise_options if exercise_map.get(ex, {}).get('target_muscle_group') == selected_muscle_input]
     
-    # Exercise Selector
-    selected_exercise = st.sidebar.selectbox("Exercise", filtered_options)
+    # Exercise Selector (Radio to prevent mobile keyboard)
+    selected_exercise = st.sidebar.radio("Exercise", filtered_options)
 
 # --- Logic: Handle Set # Reset on Exercise Change ---
 if 'last_exercise' not in st.session_state:
