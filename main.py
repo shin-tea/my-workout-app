@@ -153,7 +153,7 @@ with st.sidebar.form("log_form"):
     date_val = st.date_input("Date", datetime.date.today(), format="YYYY/MM/DD")
     
     # Stats
-    col_w, col_u = st.columns([2, 1])
+    col_w, col_u = st.columns([3, 2])
     with col_w:
         weight = st.number_input("Weight", min_value=0.0, step=2.5, format="%.1f")
     with col_u:
