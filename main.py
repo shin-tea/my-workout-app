@@ -143,6 +143,13 @@ if not df_templates.empty and 'template_name' in df_templates.columns:
             template_options.append(f"📋 {tname}")
             template_map[tname] = str(row.get('exercise_ids', '')).split(',') if row.get('exercise_ids') else []
 
+def normalize_id(val):
+    """Normalize IDs to string and strip trailing .0 if present (for numeric IDs)."""
+    s = str(val).strip()
+    if s.endswith('.0'):
+        return s[:-2]
+    return s
+
 selected_template_option = st.sidebar.selectbox("Use Template", template_options, key="template_selector")
 
 # Session state for template workflow
@@ -175,9 +182,9 @@ if using_template and exercise_ids_in_template:
     # Show exercises from template
     template_exercise_names = []
     for eid in exercise_ids_in_template:
-        eid_str = str(eid).strip()
+        eid_str = normalize_id(eid)
         for ex_name, ex_info in exercise_map.items():
-            if str(ex_info.get('exercise_id', '')) == eid_str:
+            if normalize_id(ex_info.get('exercise_id', '')) == eid_str:
                 template_exercise_names.append(ex_name)
                 break
     
@@ -633,7 +640,7 @@ with tab3:
             else:
                 try:
                     # Generate IDs
-                    ex_ids = [str(exercise_map.get(ex, {}).get('exercise_id', '')) for ex in selected_exercises_for_template]
+                    ex_ids = [normalize_id(exercise_map.get(ex, {}).get('exercise_id', '')) for ex in selected_exercises_for_template]
                     ex_ids_str = ",".join(ex_ids)
                     
                     # New ID
@@ -678,9 +685,9 @@ with tab3:
             ids = str(ids_str).split(',')
             names = []
             for eid in ids:
-                eid = eid.strip()
+                eid = normalize_id(eid)
                 for ex_name, ex_info in exercise_map.items():
-                    if str(ex_info.get('exercise_id', '')) == eid:
+                    if normalize_id(ex_info.get('exercise_id', '')) == eid:
                         names.append(ex_name)
                         break
             return ", ".join(names)
