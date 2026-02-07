@@ -134,7 +134,7 @@ else:
 st.sidebar.header("📝 Log Workout")
 
 # --- Template Selection (Optional) ---
-template_options = ["エクササイズから選択"]
+template_options = ["Select from Exercises"]
 template_map = {}
 if not df_templates.empty and 'template_name' in df_templates.columns:
     for _, row in df_templates.iterrows():
@@ -143,21 +143,24 @@ if not df_templates.empty and 'template_name' in df_templates.columns:
             template_options.append(f"📋 {tname}")
             template_map[tname] = row.get('exercise_ids', '').split(',') if row.get('exercise_ids') else []
 
-selected_template_option = st.sidebar.selectbox("テンプレから選択", template_options, key="template_selector")
+selected_template_option = st.sidebar.selectbox("Use Template", template_options, key="template_selector")
 
 # Session state for template workflow
-if 'template_exercises' not in st.session_state:
-    st.session_state['template_exercises'] = []
+if 'last_template' not in st.session_state:
+    st.session_state['last_template'] = selected_template_option
 if 'template_current_idx' not in st.session_state:
     st.session_state['template_current_idx'] = 0
 
+# Reset index if template selection changes
+if st.session_state['last_template'] != selected_template_option:
+    st.session_state['template_current_idx'] = 0
+    st.session_state['last_template'] = selected_template_option
+
 # Parse template selection
-using_template = selected_template_option != "エクササイズから選択"
+using_template = selected_template_option != "Select from Exercises"
 if using_template:
     template_name = selected_template_option.replace("📋 ", "")
     exercise_ids_in_template = template_map.get(template_name, [])
-    # Convert exercise IDs to exercise names
-    id_to_name = {str(v.get('exercise_id', '')): k for k, v in exercise_map.items()} if 'exercise_map' in dir() else {}
 else:
     exercise_ids_in_template = []
 
@@ -173,14 +176,14 @@ if using_template and exercise_ids_in_template:
                 break
     
     if template_exercise_names:
-        st.sidebar.markdown(f"**テンプレ内エクササイズ:** {len(template_exercise_names)}種目")
+        st.sidebar.markdown(f"**Exercises in Template:** {len(template_exercise_names)}")
         current_idx = st.session_state.get('template_current_idx', 0)
         if current_idx >= len(template_exercise_names):
             current_idx = 0
             st.session_state['template_current_idx'] = 0
         
         selected_exercise = st.sidebar.selectbox(
-            "Exercise (テンプレ順)", 
+            "Exercise (Template Order)", 
             template_exercise_names, 
             index=current_idx,
             key="template_ex_select"
@@ -189,8 +192,8 @@ if using_template and exercise_ids_in_template:
         if selected_exercise in template_exercise_names:
             st.session_state['template_current_idx'] = template_exercise_names.index(selected_exercise)
     else:
-        st.sidebar.warning("テンプレにエクササイズが見つかりません")
-        selected_exercise = filtered_options[0] if filtered_options else None
+        st.sidebar.warning("No exercises found in template")
+        selected_exercise = None
 else:
     # Normal exercise selection
     # Muscle Filter
@@ -204,6 +207,59 @@ else:
     
     # Exercise Selector
     selected_exercise = st.sidebar.selectbox("Exercise", filtered_options)
+
+# --- Template Creation ---
+with st.sidebar.expander("📁 Manage Templates"):
+    st.markdown("### Create New Template")
+    new_template_name = st.text_input("Template Name", placeholder="e.g., Chest Day")
+    
+    # Multiple Exercise Selection
+    # Use the same filtering logic for template creation
+    create_muscle_filter = st.selectbox("Filter Exercises by Muscle", ["All"] + muscle_groups_input, key="create_template_muscle")
+    options_to_select = exercise_options
+    if create_muscle_filter != "All":
+        options_to_select = [ex for ex in exercise_options if exercise_map.get(ex, {}).get('target_muscle_group') == create_muscle_filter]
+    
+    selected_exercises_for_template = st.multiselect("Select Exercises", options_to_select)
+    
+    if st.button("Save Template", type="primary", use_container_width=True):
+        if not new_template_name:
+            st.error("Please enter a template name.")
+        elif not selected_exercises_for_template:
+            st.error("Please select at least one exercise.")
+        else:
+            try:
+                # Generate IDs
+                ex_ids = [str(exercise_map.get(ex, {}).get('exercise_id', '')) for ex in selected_exercises_for_template]
+                ex_ids_str = ",".join(ex_ids)
+                
+                # New ID
+                if df_templates.empty:
+                    new_tid = "TMP001"
+                else:
+                    last_id = df_templates['template_id'].iloc[-1]
+                    try:
+                        num = int(last_id.replace("TMP", "")) + 1
+                        new_tid = f"TMP{num:03d}"
+                    except:
+                        new_tid = f"TMP{len(df_templates)+1:03d}"
+                
+                new_template_row = [
+                    new_tid,
+                    new_template_name,
+                    ex_ids_str,
+                    datetime.date.today().strftime("%Y/%m/%d")
+                ]
+                
+                ws_templates = sh.worksheet(SHEET_TEMPLATE_MASTER)
+                ws_templates.append_row(new_template_row, value_input_option='USER_ENTERED')
+                
+                st.success(f"Template '{new_template_name}' saved!")
+                time.sleep(1)
+                st.cache_data.clear()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to save template: {e}")
 
 # --- Logic: Handle Set # Reset on Exercise Change ---
 if 'last_exercise' not in st.session_state:
@@ -320,7 +376,7 @@ if submitted:
 # --- Dashboard View ---
 st.subheader("📊 Progress & History")
 
-tab1, tab2 = st.tabs(["📈 Analysis", "📅 History & Edit"])
+tab1, tab2, tab3 = st.tabs(["📈 Analysis", "📅 History & Edit", "📋 Templates"])
 
 # === TAB 1: Analysis ===
 with tab1:
@@ -599,4 +655,68 @@ with tab2:
                                 st.error(f"Failed to delete rows: {e}")
     else:
         st.info("No data available.")
+
+# === TAB 3: Templates ===
+with tab3:
+    st.markdown("### 📋 Saved Templates")
+    if not df_templates.empty:
+        df_temp_display = df_templates.copy()
+        
+        # Add Delete checkbox
+        if "Delete" not in df_temp_display.columns:
+            df_temp_display.insert(0, "Delete", False)
+            
+        # Display template list with detail
+        # We want to show exercise names instead of just IDs if possible
+        def get_exercise_names(ids_str):
+            ids = ids_str.split(',')
+            names = []
+            for eid in ids:
+                eid = eid.strip()
+                for ex_name, ex_info in exercise_map.items():
+                    if str(ex_info.get('exercise_id', '')) == eid:
+                        names.append(ex_name)
+                        break
+            return ", ".join(names)
+            
+        if 'exercise_ids' in df_temp_display.columns:
+            df_temp_display['Exercises'] = df_temp_display['exercise_ids'].apply(get_exercise_names)
+            
+        edited_templates = st.data_editor(
+            df_temp_display,
+            hide_index=True,
+            column_config={
+                "Delete": st.column_config.CheckboxColumn("❌", width="small", default=False),
+                "template_id": st.column_config.TextColumn("ID", disabled=True),
+                "template_name": st.column_config.TextColumn("Template Name", disabled=True),
+                "exercise_ids": None, # Hide raw IDs
+                "created_at": st.column_config.TextColumn("Created At", disabled=True),
+                "Exercises": st.column_config.TextColumn("Exercises", width="large", disabled=True),
+            },
+            key="template_list_editor"
+        )
+        
+        if st.button("🗑️ Delete Selected Templates", type="primary"):
+            ids_to_del = edited_templates[edited_templates['Delete'] == True]['template_id'].tolist()
+            if not ids_to_del:
+                st.warning("No templates selected for deletion.")
+            else:
+                try:
+                    ws_temp = sh.worksheet(SHEET_TEMPLATE_MASTER)
+                    # We need to rewrite the sheet excluding deleted IDs
+                    df_remaining_templates = df_templates[~df_templates['template_id'].isin(ids_to_del)]
+                    
+                    ws_temp.clear()
+                    headers = df_templates.columns.tolist()
+                    temp_data_to_write = [headers] + df_remaining_templates.values.tolist()
+                    ws_temp.update(range_name='A1', values=temp_data_to_write, value_input_option='USER_ENTERED')
+                    
+                    st.success(f"Deleted {len(ids_to_del)} template(s).")
+                    time.sleep(1)
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to delete templates: {e}")
+    else:
+        st.info("No templates saved yet. Create one in the sidebar!")
 
