@@ -126,6 +126,18 @@ if selected_muscle_input != "All":
 # Exercise Selector
 selected_exercise = st.sidebar.selectbox("Exercise", filtered_options)
 
+# --- Logic: Handle Set # Reset on Exercise Change ---
+if 'last_exercise' not in st.session_state:
+    st.session_state['last_exercise'] = None
+if 'set_num_input' not in st.session_state:
+    st.session_state['set_num_input'] = 1
+
+# If exercise changed, reset set number to 1
+if st.session_state['last_exercise'] != selected_exercise:
+    st.session_state['set_num_input'] = 1
+    st.session_state['last_exercise'] = selected_exercise
+# ----------------------------------------------------
+
 with st.sidebar.form("log_form"):
     # Date
     date_val = st.date_input("Date", datetime.date.today())
@@ -141,7 +153,9 @@ with st.sidebar.form("log_form"):
     with col_r:
         reps = st.number_input("Reps", min_value=0, step=1, value=10)
     with col_s:
-        set_num = st.number_input("Set #", min_value=1, step=1, value=1)
+        # Link this input to session_state with a key
+        # Value is controlled by st.session_state['set_num_input']
+        set_num = st.number_input("Set #", min_value=1, step=1, key="set_num_input")
         
     rpe = st.number_input("RPE (1-10)", min_value=0.0, max_value=10.0, step=0.5, value=8.0)
     set_type = st.selectbox("Set Type", set_types, index=0 if 'Main' in set_types else 0)
@@ -205,6 +219,10 @@ if submitted:
         ws_log.append_rows(rows_to_append)
         
         st.success(f"Running: Added Set #{set_num} of {selected_exercise}!")
+        
+        # Increment Set # for next log
+        st.session_state['set_num_input'] += 1
+        
         st.cache_data.clear()
         st.rerun()
     except Exception as e:
