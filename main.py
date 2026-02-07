@@ -308,10 +308,22 @@ with tab1:
                     y='Weight (kg)',
                     size='Reps',
                     color='Estimated 1RM (kg)', # Color by intensity
-                    hover_data={'Set #': True, 'Reps': True, 'Weight': ':.1f', 'RPE': True, 'Memo': True, 'Estimated 1RM (kg)': ':.1f'},
-                    title=f"{selected_chart_exercise} - Performance Analysis"
+                    title=f"{selected_chart_exercise} - Performance Analysis",
+                    custom_data=['Set #', 'Reps', 'Weight (kg)', 'RPE', 'Memo', 'Estimated 1RM (kg)']
                 )
-                fig.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey'), sizeref=0.5, sizemin=8))
+                fig.update_traces(
+                    marker=dict(line=dict(width=1, color='DarkSlateGrey'), sizeref=0.5, sizemin=8),
+                    hovertemplate=(
+                        "<b>%{x|%Y/%m/%d}</b><br>"
+                        "Weight: %{customdata[2]:.1f} kg<br>"
+                        "Reps: %{customdata[1]}<br>"
+                        "Set #: %{customdata[0]}<br>"
+                        "RPE: %{customdata[3]}<br>"
+                        "1RM: %{customdata[5]:.1f} kg<br>"
+                        "Memo: %{customdata[4]}"
+                        "<extra></extra>"
+                    )
+                )
                 fig.update_layout(hovermode="closest", showlegend=False, coloraxis_showscale=False)
                 st.plotly_chart(fig, use_container_width=True)
                 
