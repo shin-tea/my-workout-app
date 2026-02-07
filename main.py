@@ -10,6 +10,7 @@ from google.oauth2.service_account import Credentials
 SHEET_TRAINING_LOG = "Training Log"
 SHEET_EXERCISE_MASTER = "Exercise Master"
 SHEET_CONSTANTS = "Constants"
+SHEET_TEMPLATE_MASTER = "Template Master"
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -62,7 +63,7 @@ sh = init_connection()
 def load_data():
     """Load all necessary sheets from GSheets."""
     if sh is None:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         
     try:
         # Load Training Log
@@ -84,12 +85,24 @@ def load_data():
         data_constants = ws_constants.get_all_records()
         df_constants = pd.DataFrame(data_constants)
         
-        return df_log, df_master, df_constants
+        # Load Template Master (create if not exists)
+        try:
+            ws_templates = sh.worksheet(SHEET_TEMPLATE_MASTER)
+            data_templates = ws_templates.get_all_records()
+            df_templates = pd.DataFrame(data_templates)
+        except gspread.exceptions.WorksheetNotFound:
+            # Create the sheet with headers
+            ws_templates = sh.add_worksheet(title=SHEET_TEMPLATE_MASTER, rows=100, cols=10)
+            headers = ["template_id", "template_name", "exercise_ids", "created_at"]
+            ws_templates.append_row(headers, value_input_option='USER_ENTERED')
+            df_templates = pd.DataFrame(columns=headers)
+        
+        return df_log, df_master, df_constants, df_templates
     except Exception as e:
         st.error(f"Error loading data: {e}")
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-df_log, df_master, df_constants = load_data()
+df_log, df_master, df_constants, df_templates = load_data()
 
 if df_master.empty or df_constants.empty:
     if sh is not None:
@@ -120,18 +133,77 @@ else:
 # --- Sidebar: Input Form ---
 st.sidebar.header("📝 Log Workout")
 
+# --- Template Selection (Optional) ---
+template_options = ["エクササイズから選択"]
+template_map = {}
+if not df_templates.empty and 'template_name' in df_templates.columns:
+    for _, row in df_templates.iterrows():
+        tname = row.get('template_name', '')
+        if tname:
+            template_options.append(f"📋 {tname}")
+            template_map[tname] = row.get('exercise_ids', '').split(',') if row.get('exercise_ids') else []
+
+selected_template_option = st.sidebar.selectbox("テンプレから選択", template_options, key="template_selector")
+
+# Session state for template workflow
+if 'template_exercises' not in st.session_state:
+    st.session_state['template_exercises'] = []
+if 'template_current_idx' not in st.session_state:
+    st.session_state['template_current_idx'] = 0
+
+# Parse template selection
+using_template = selected_template_option != "エクササイズから選択"
+if using_template:
+    template_name = selected_template_option.replace("📋 ", "")
+    exercise_ids_in_template = template_map.get(template_name, [])
+    # Convert exercise IDs to exercise names
+    id_to_name = {str(v.get('exercise_id', '')): k for k, v in exercise_map.items()} if 'exercise_map' in dir() else {}
+else:
+    exercise_ids_in_template = []
+
 # --- Interactive Selection (Outside Form) ---
-# Muscle Filter
-muscle_groups_input = sorted(df_master['target_muscle_group'].dropna().unique().tolist()) if 'target_muscle_group' in df_master.columns else []
-selected_muscle_input = st.sidebar.selectbox("Filter Muscle", ["All"] + muscle_groups_input)
-
-# Filter Options
-filtered_options = exercise_options
-if selected_muscle_input != "All":
-    filtered_options = [ex for ex in exercise_options if exercise_map.get(ex, {}).get('target_muscle_group') == selected_muscle_input]
-
-# Exercise Selector
-selected_exercise = st.sidebar.selectbox("Exercise", filtered_options)
+if using_template and exercise_ids_in_template:
+    # Show exercises from template
+    template_exercise_names = []
+    for eid in exercise_ids_in_template:
+        eid_str = str(eid).strip()
+        for ex_name, ex_info in exercise_map.items():
+            if str(ex_info.get('exercise_id', '')) == eid_str:
+                template_exercise_names.append(ex_name)
+                break
+    
+    if template_exercise_names:
+        st.sidebar.markdown(f"**テンプレ内エクササイズ:** {len(template_exercise_names)}種目")
+        current_idx = st.session_state.get('template_current_idx', 0)
+        if current_idx >= len(template_exercise_names):
+            current_idx = 0
+            st.session_state['template_current_idx'] = 0
+        
+        selected_exercise = st.sidebar.selectbox(
+            "Exercise (テンプレ順)", 
+            template_exercise_names, 
+            index=current_idx,
+            key="template_ex_select"
+        )
+        # Sync index
+        if selected_exercise in template_exercise_names:
+            st.session_state['template_current_idx'] = template_exercise_names.index(selected_exercise)
+    else:
+        st.sidebar.warning("テンプレにエクササイズが見つかりません")
+        selected_exercise = filtered_options[0] if filtered_options else None
+else:
+    # Normal exercise selection
+    # Muscle Filter
+    muscle_groups_input = sorted(df_master['target_muscle_group'].dropna().unique().tolist()) if 'target_muscle_group' in df_master.columns else []
+    selected_muscle_input = st.sidebar.selectbox("Filter Muscle", ["All"] + muscle_groups_input)
+    
+    # Filter Options
+    filtered_options = exercise_options
+    if selected_muscle_input != "All":
+        filtered_options = [ex for ex in exercise_options if exercise_map.get(ex, {}).get('target_muscle_group') == selected_muscle_input]
+    
+    # Exercise Selector
+    selected_exercise = st.sidebar.selectbox("Exercise", filtered_options)
 
 # --- Logic: Handle Set # Reset on Exercise Change ---
 if 'last_exercise' not in st.session_state:
