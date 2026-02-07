@@ -490,51 +490,78 @@ with tab2:
 with tab3:
     st.markdown("### 💪 Exercise Master")
     if not df_master.empty:
-        # Prepare for Editor
-        # We want to edit Description.
-        # ID is hidden. Name/Target read-only.
+        # --- Filter Section ---
+        col_m, col_e = st.columns(2)
         
-        # Ensure description exists
-        if 'description' not in df_master.columns:
-            df_master['description'] = ""
+        # 1. Muscle Group Filter
+        unique_muscles = sorted(df_master['target_muscle_group'].dropna().unique().tolist())
+        with col_m:
+            selected_master_muscle = st.selectbox("Filter by Muscle", ["All"] + unique_muscles, key="master_muscle")
             
-        edited_master = st.data_editor(
-            df_master,
-            hide_index=True,
-            column_config={
-                "exercise_id": None, # Hide
-                "exercise_name": st.column_config.TextColumn("Exercise Name", disabled=True),
-                "target_muscle_group": st.column_config.TextColumn("Target Muscle", disabled=True),
-                "description": st.column_config.TextColumn("Description (Editable)"),
-                "image_url": st.column_config.ImageColumn("Image", help="Image URL") if "image_url" in df_master.columns else None
-            },
-            disabled=["exercise_id", "exercise_name", "target_muscle_group"],
-            key="master_editor",
-            use_container_width=True
-        )
+        # 2. Exercise Select
+        # Filter df based on muscle
+        if selected_master_muscle != "All":
+            df_master_filtered = df_master[df_master['target_muscle_group'] == selected_master_muscle]
+        else:
+            df_master_filtered = df_master
+            
+        unique_master_exercises = sorted(df_master_filtered['exercise_name'].unique().tolist())
         
-        if st.button("💾 Save Changes to Master", type="primary"):
-            try:
-                # Update GSheet
-                ws_master = sh.worksheet(SHEET_EXERCISE_MASTER)
-                
-                # We need to write back the entire dataframe or just changes.
-                # Writing back entire dataframe is safest for consistency if size is small.
-                
-                # Check for columns
-                headers = edited_master.columns.tolist()
-                data_to_write = [headers] + edited_master.values.tolist()
-                
-                ws_master.clear()
-                ws_master.update(range_name='A1', values=data_to_write, value_input_option='USER_ENTERED')
-                
-                st.success("Exercise Master updated successfully!")
-                time.sleep(1)
-                st.cache_data.clear()
-                st.rerun()
-            except Exception as e:
-                st.error(f"Failed to save changes: {e}")
+        with col_e:
+            selected_master_exercise = st.selectbox("Select Exercise", unique_master_exercises, key="master_exercise")
             
+        st.divider()
+        
+        # --- Detail/Edit Section ---
+        if selected_master_exercise:
+            # Get the specific row
+            # We use boolean indexing, assuming exercise names are unique or we take the first one.
+            # Using exercise_name is safer for the user selection.
+            # We need the index to update the original df_master later.
+            
+            # Find the row in the original df_master
+            # We use df_master.index[condition] to get the index label
+            mask = df_master['exercise_name'] == selected_master_exercise
+            if mask.any():
+                original_idx = df_master.index[mask][0]
+                row_data = df_master.loc[original_idx]
+                
+                st.markdown(f"#### 🏋️ {row_data['exercise_name']}")
+                st.caption(f"Target Muscle: **{row_data['target_muscle_group']}**")
+                
+                # Editable Fields
+                current_desc = row_data.get('description', "")
+                if pd.isna(current_desc): current_desc = ""
+                
+                new_desc = st.text_area("Description / Notes", value=str(current_desc), height=150)
+                
+                if st.button("💾 Save Changes", type="primary"):
+                    try:
+                        # Update local DF first
+                        df_master.at[original_idx, 'description'] = new_desc
+                        
+                        # Update GSheet
+                        # We will use the same full-overwrite strategy for simplicity and safety
+                        # ensuring we match the column order.
+                        ws_master = sh.worksheet(SHEET_EXERCISE_MASTER)
+                        headers = df_master.columns.tolist()
+                        # Replace NaNs with empty string for GSheet compatibility
+                        df_to_save = df_master.fillna("")
+                        data_to_write = [headers] + df_to_save.values.tolist()
+                        
+                        ws_master.clear()
+                        ws_master.update(range_name='A1', values=data_to_write, value_input_option='USER_ENTERED')
+                        
+                        st.success(f"Updated description for {selected_master_exercise}!")
+                        time.sleep(1)
+                        st.cache_data.clear()
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"Failed to save changes: {e}")
+            else:
+                 st.error("Selected exercise not found in data.")
+                 
     else:
         st.info("Exercise Master data not found.")
 
