@@ -129,12 +129,15 @@ selected_exercise = st.sidebar.selectbox("Exercise", filtered_options)
 # --- Logic: Handle Set # Reset on Exercise Change ---
 if 'last_exercise' not in st.session_state:
     st.session_state['last_exercise'] = None
-if 'set_num_input' not in st.session_state:
-    st.session_state['set_num_input'] = 1
+if 'set_input_val' not in st.session_state:
+    st.session_state['set_input_val'] = 1
+if 'set_input_key' not in st.session_state:
+    st.session_state['set_input_key'] = 0
 
 # If exercise changed, reset set number to 1
 if st.session_state['last_exercise'] != selected_exercise:
-    st.session_state['set_num_input'] = 1
+    st.session_state['set_input_val'] = 1
+    st.session_state['set_input_key'] += 1 # Force widget recreate
     st.session_state['last_exercise'] = selected_exercise
 # ----------------------------------------------------
 
@@ -153,9 +156,14 @@ with st.sidebar.form("log_form"):
     with col_r:
         reps = st.number_input("Reps", min_value=0, step=1, value=10)
     with col_s:
-        # Link this input to session_state with a key
-        # Value is controlled by st.session_state['set_num_input']
-        set_num = st.number_input("Set #", min_value=1, step=1, key="set_num_input")
+        # Use dynamic key to allow programmatic updates without "widget value" conflict
+        set_num = st.number_input(
+            "Set #", 
+            min_value=1, 
+            step=1, 
+            value=st.session_state['set_input_val'],
+            key=f"set_num_{st.session_state['set_input_key']}"
+        )
         
     rpe = st.number_input("RPE (1-10)", min_value=1.0, max_value=10.0, step=0.5, value=None)
     set_type = st.selectbox("Set Type", set_types, index=0 if 'Main' in set_types else 0)
@@ -221,7 +229,8 @@ if submitted:
         st.success(f"Running: Added Set #{set_num} of {selected_exercise}!")
         
         # Increment Set # for next log
-        st.session_state['set_num_input'] += 1
+        st.session_state['set_input_val'] = int(set_num) + 1
+        st.session_state['set_input_key'] += 1 # Force widget recreate next run
         
         st.cache_data.clear()
         st.rerun()
