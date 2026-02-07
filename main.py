@@ -444,7 +444,7 @@ with tab1:
                     
                     new_desc = st.text_area("Description / Notes", value=str(current_desc), height=100, key="analysis_desc_edit")
                     
-                    if st.button("💾 Save Description", key="save_desc_analysis"):
+                    if st.button("Save Description", key="save_desc_analysis"):
                         try:
                              df_master.at[original_idx, 'description'] = new_desc
                              ws_master = sh.worksheet(SHEET_EXERCISE_MASTER)
