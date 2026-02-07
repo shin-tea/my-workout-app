@@ -141,29 +141,17 @@ if not df_templates.empty and 'template_name' in df_templates.columns:
         tname = row.get('template_name', '')
         if tname:
             template_options.append(f"📋 {tname}")
-            template_map[tname] = str(row.get('exercise_ids', '')).split(',') if row.get('exercise_ids') else []
+            raw_ids = str(row.get('exercise_ids', ''))
+            delim = '|' if '|' in raw_ids else ','
+            template_map[tname] = raw_ids.split(delim) if raw_ids else []
 
 def normalize_id(val):
     """Normalize IDs to string and strip trailing .0 if present (for numeric IDs)."""
+    if pd.isna(val): return ""
     s = str(val).strip()
     if s.endswith('.0'):
         return s[:-2]
     return s
-
-if st.sidebar.checkbox("🐞 Enable ID Debugging"):
-    st.sidebar.write("### 🐞 ID Sync Debug")
-    st.sidebar.write("Master Col Names:", df_master.columns.tolist())
-    if not df_master.empty:
-        st.sidebar.write("Master (first 5):", df_master[['exercise_id', 'exercise_name']].head(5).to_dict('records'))
-    
-    if selected_template_option != "Select from Exercises":
-        tname = selected_template_option.replace("📋 ", "")
-        ids = template_map.get(tname, [])
-        st.sidebar.write(f"Selected Template '{tname}' IDs:", ids)
-        st.sidebar.write("Normalized Selected IDs:", [normalize_id(eid) for eid in ids])
-    
-    if not df_templates.empty:
-        st.sidebar.write("Template IDs (first row):", df_templates.iloc[0].get('exercise_ids'))
 
 selected_template_option = st.sidebar.selectbox("Use Template", template_options, key="template_selector")
 
@@ -654,9 +642,9 @@ with tab3:
                 st.error("Please select at least one exercise.")
             else:
                 try:
-                    # Generate IDs
+                    # Generate IDs using | as delimiter to prevent GSheet numeric auto-formatting
                     ex_ids = [normalize_id(exercise_map.get(ex, {}).get('exercise_id', '')) for ex in selected_exercises_for_template]
-                    ex_ids_str = ",".join(ex_ids)
+                    ex_ids_str = "|".join(ex_ids)
                     
                     # New ID
                     if df_templates.empty:
@@ -696,8 +684,14 @@ with tab3:
             df_temp_display.insert(0, "Delete", False)
             
         # Display template list with detail
+        # Display template list with detail
         def get_exercise_names(ids_str):
-            ids = str(ids_str).split(',')
+            # Support both | (new) and , (old/incorrectly formatted)
+            if '|' in str(ids_str):
+                ids = str(ids_str).split('|')
+            else:
+                ids = str(ids_str).split(',')
+            
             names = []
             for eid in ids:
                 eid = normalize_id(eid)
