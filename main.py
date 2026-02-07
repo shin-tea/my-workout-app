@@ -165,6 +165,12 @@ else:
     exercise_ids_in_template = []
 
 # --- Interactive Selection (Outside Form) ---
+muscle_groups_input = sorted(df_master['target_muscle_group'].dropna().unique().tolist()) if 'target_muscle_group' in df_master.columns else []
+
+# Define normal selection defaults for fallback
+selected_muscle_input = "All"
+filtered_options = exercise_options
+
 if using_template and exercise_ids_in_template:
     # Show exercises from template
     template_exercise_names = []
@@ -197,11 +203,9 @@ if using_template and exercise_ids_in_template:
 else:
     # Normal exercise selection
     # Muscle Filter
-    muscle_groups_input = sorted(df_master['target_muscle_group'].dropna().unique().tolist()) if 'target_muscle_group' in df_master.columns else []
     selected_muscle_input = st.sidebar.selectbox("Filter Muscle", ["All"] + muscle_groups_input)
     
     # Filter Options
-    filtered_options = exercise_options
     if selected_muscle_input != "All":
         filtered_options = [ex for ex in exercise_options if exercise_map.get(ex, {}).get('target_muscle_group') == selected_muscle_input]
     
