@@ -414,7 +414,7 @@ with tab1:
                     )
                 )
                 fig.update_layout(hovermode="closest", showlegend=False, coloraxis_showscale=False)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
                 
                 # Metrics
                 col1, col2, col3 = st.columns(3)
