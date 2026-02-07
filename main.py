@@ -421,114 +421,98 @@ with tab2:
                  st.info("👈 Select dates from the left to view logs.")
             else:
                 # Filter for ALL selected dates
-                # But display them comfortably. Review logic for grouping.
-                # We reused logic: df_display is subset. 
-                # df_log_history['Date'].dt.date is the comparison key.
-                
                 df_display = df_log_history[df_log_history['Date'].dt.date.isin(selected_dates)]
                 
-                # Now we proceed to build the editors.
-                # The existing code loops through 'unique_display_dates' from 'df_display'.
-                # So this naturally handles multiple dates!
-                pass # variable df_display is set.
-
-
-        if df_display.empty:
-            st.info("No logs found.")
-        else:
-            # Sort: Oldest to Newest as requested
-            # Sorting by Date ASC, then ID ASC
-            df_display = df_display.sort_values(by=['Date', 'ID'], ascending=[True, True])
-            
-            # Group by Date for display
-            # We will collect all edited dataframes to process deletions at once
-            edited_dfs = []
-            
-            # Grouping key
-            # If "All Time", we show multiple tables.
-            # If specific date, just one table (loop runs once).
-            
-            # Insert Delete column globally first to ensure it's there
-            if "Delete" not in df_display.columns:
-                df_display.insert(0, "Delete", False)
-                
-            unique_display_dates = sorted(df_display['Date'].dt.date.unique())
-            
-            st.caption("Check 'Delete' box in any table and click the button at the bottom to remove records.")
-            
-            for d in unique_display_dates:
-                st.markdown(f"#### 📅 {d.strftime('%Y/%m/%d')}")
-                
-                # Subset for this date
-                df_date = df_display[df_display['Date'].dt.date == d]
-                
-                # Show Data Editor
-                # Hide ID, ExerciseID, Date (since it's the header)
-                edited = st.data_editor(
-                    df_date,
-                    hide_index=True,
-                    column_config={
-                        "Delete": st.column_config.CheckboxColumn(
-                            "❌",
-                            width="small",
-                            default=False,
-                        ),
-                        "ID": None, # Hide
-                        "ExerciseID": None, # Hide
-                        "Date": None, # Hide
-                        "Exercise": st.column_config.TextColumn("Exercise", disabled=True),
-                        "Weight": st.column_config.NumberColumn("Weight", format="%.1f"),
-                        "Estimated 1RM (kg)": st.column_config.NumberColumn("1RM", format="%.1f"),
-                    },
-                    disabled=["Exercise", "Target", "Set #", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo", "ID", "ExerciseID", "Date", "Estimated 1RM (kg)", "Weight (kg)"],
-                    key=f"editor_{d}"
-                )
-                edited_dfs.append(edited)
-                st.divider()
-
-            # Process Deletion
-            if st.button("🗑️ Delete Selected Rows", type="primary"):
-                # Collect IDs from all tables
-                ids_to_delete = []
-                for ed in edited_dfs:
-                    if not ed.empty and 'Delete' in ed.columns:
-                         deleted_rows = ed[ed['Delete'] == True]
-                         if not deleted_rows.empty:
-                             ids_to_delete.extend(deleted_rows['ID'].tolist())
-                
-                if not ids_to_delete:
-                    st.warning("No rows selected for deletion.")
+                if df_display.empty:
+                    st.info("No logs found for selected dates.")
                 else:
-                    st.write(f"Deleting {len(ids_to_delete)} records...")
-                    try:
-                        # 1. Reload latest data
-                        ws_log_current = sh.worksheet(SHEET_TRAINING_LOG)
-                        current_data = ws_log_current.get_all_records()
-                        df_current = pd.DataFrame(current_data)
+                    # Sort: Oldest to Newest as requested
+                    df_display = df_display.sort_values(by=['Date', 'ID'], ascending=[True, True])
+                    
+                    # We will collect all edited dataframes to process deletions at once
+                    edited_dfs = []
+                    
+                    # Insert Delete column globally first to ensure it's there
+                    if "Delete" not in df_display.columns:
+                        df_display.insert(0, "Delete", False)
                         
-                        # 2. Filter out deleted IDs
-                        if 'ID' in df_current.columns:
-                            df_current['ID'] = pd.to_numeric(df_current['ID'], errors='coerce').fillna(0).astype(int)
-                            
-                        df_remaining = df_current[~df_current['ID'].isin(ids_to_delete)]
+                    unique_display_dates = sorted(df_display['Date'].dt.date.unique())
+                    
+                    st.caption("Check 'Delete' box in any table and click the button at the bottom to remove records.")
+                    
+                    for d in unique_display_dates:
+                        st.markdown(f"#### 📅 {d.strftime('%Y/%m/%d')}")
                         
-                        # 3. Rewrite Sheet
-                        ws_log_current.clear()
+                        # Subset for this date
+                        df_date = df_display[df_display['Date'].dt.date == d]
                         
-                        headers = df_current.columns.tolist() if not df_current.empty else []
-                        if not headers:
-                             headers = ["ID", "Date", "ExerciseID", "Target", "Exercise", "Set #", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"]
+                        # Show Data Editor
+                        # Hide ID, ExerciseID, Date (since it's the header)
+                        edited = st.data_editor(
+                            df_date,
+                            hide_index=True,
+                            column_config={
+                                "Delete": st.column_config.CheckboxColumn(
+                                    "❌",
+                                    width="small",
+                                    default=False,
+                                ),
+                                "ID": None, # Hide
+                                "ExerciseID": None, # Hide
+                                "Date": None, # Hide
+                                "Exercise": st.column_config.TextColumn("Exercise", disabled=True),
+                                "Weight": st.column_config.NumberColumn("Weight", format="%.1f"),
+                                "Estimated 1RM (kg)": st.column_config.NumberColumn("1RM", format="%.1f"),
+                            },
+                            disabled=["Exercise", "Target", "Set #", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo", "ID", "ExerciseID", "Date", "Estimated 1RM (kg)", "Weight (kg)"],
+                            key=f"editor_{d}"
+                        )
+                        edited_dfs.append(edited)
+                        st.divider()
 
-                        update_data = [headers] + df_remaining.values.tolist()
-                        ws_log_current.update(range_name='A1', values=update_data, value_input_option='USER_ENTERED')
+                    # Process Deletion
+                    if st.button("🗑️ Delete Selected Rows", type="primary"):
+                        # Collect IDs from all tables
+                        ids_to_delete = []
+                        for ed in edited_dfs:
+                            if not ed.empty and 'Delete' in ed.columns:
+                                 deleted_rows = ed[ed['Delete'] == True]
+                                 if not deleted_rows.empty:
+                                     ids_to_delete.extend(deleted_rows['ID'].tolist())
                         
-                        st.success(f"Deleted {len(ids_to_delete)} records.")
-                        time.sleep(1)
-                        st.cache_data.clear()
-                        st.rerun()
-                        
-                    except Exception as e:
-                        st.error(f"Failed to delete rows: {e}")
+                        if not ids_to_delete:
+                            st.warning("No rows selected for deletion.")
+                        else:
+                            st.write(f"Deleting {len(ids_to_delete)} records...")
+                            try:
+                                # 1. Reload latest data
+                                ws_log_current = sh.worksheet(SHEET_TRAINING_LOG)
+                                current_data = ws_log_current.get_all_records()
+                                df_current = pd.DataFrame(current_data)
+                                
+                                # 2. Filter out deleted IDs
+                                if 'ID' in df_current.columns:
+                                    df_current['ID'] = pd.to_numeric(df_current['ID'], errors='coerce').fillna(0).astype(int)
+                                    
+                                df_remaining = df_current[~df_current['ID'].isin(ids_to_delete)]
+                                
+                                # 3. Rewrite Sheet
+                                ws_log_current.clear()
+                                
+                                headers = df_current.columns.tolist() if not df_current.empty else []
+                                if not headers:
+                                     headers = ["ID", "Date", "ExerciseID", "Target", "Exercise", "Set #", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"]
+
+                                update_data = [headers] + df_remaining.values.tolist()
+                                ws_log_current.update(range_name='A1', values=update_data, value_input_option='USER_ENTERED')
+                                
+                                st.success(f"Deleted {len(ids_to_delete)} records.")
+                                time.sleep(1)
+                                st.cache_data.clear()
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"Failed to delete rows: {e}")
     else:
         st.info("No data available.")
 
