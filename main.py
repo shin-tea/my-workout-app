@@ -224,7 +224,7 @@ if submitted:
             row_vals = [row_dict.get(h, "") for h in headers]
             rows_to_append.append(row_vals)
             
-        ws_log.append_rows(rows_to_append)
+        ws_log.append_rows(rows_to_append, value_input_option='USER_ENTERED')
         
         st.success(f"Running: Added Set #{set_num} of {selected_exercise}!")
         
