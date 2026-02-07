@@ -131,17 +131,13 @@ else:
     st.error("Exercise Master sheet missing 'exercise_name' column.")
     st.stop()
 
-# --- Sidebar: Input Form ---
-# st.sidebar.header("📝 Log Workout")
-
-# --- Template Selection (Optional) ---
 template_options = ["Select from Exercises"]
 template_map = {}
 if not df_templates.empty and 'template_name' in df_templates.columns:
     for _, row in df_templates.iterrows():
         tname = row.get('template_name', '')
         if tname:
-            template_options.append(f"📋 {tname}")
+            template_options.append(tname)
             raw_ids = str(row.get('exercise_ids', ''))
             delim = '|' if '|' in raw_ids else ','
             template_map[tname] = raw_ids.split(delim) if raw_ids else []
@@ -170,7 +166,7 @@ if st.session_state['last_template'] != selected_template_option:
 # Parse template selection
 using_template = selected_template_option != "Select from Exercises"
 if using_template:
-    template_name = selected_template_option.replace("📋 ", "")
+    template_name = selected_template_option
     exercise_ids_in_template = template_map.get(template_name, [])
 else:
     exercise_ids_in_template = []
@@ -336,9 +332,7 @@ if submitted:
         st.error(f"Failed to update spreadsheet: {e}")
 
 # --- Dashboard View ---
-# st.subheader("📊 Progress & History")
-
-tab1, tab2, tab3 = st.tabs(["📈 Analysis", "📅 History & Edit", "📋 Templates"])
+tab1, tab2, tab3 = st.tabs(["Analysis", "History & Edit", "Templates"])
 
 # === TAB 1: Analysis ===
 with tab1:
@@ -428,7 +422,7 @@ with tab1:
                 col3.metric("Total Sets Logged", total_sets)
                 
                 st.divider()
-                st.markdown("### ℹ️ Exercise Details & Notes")
+                st.markdown("### Exercise Details & Notes")
                 
                 # Retrieve details from Master
                 ex_info = exercise_map.get(selected_chart_exercise, {})
@@ -471,7 +465,7 @@ with tab1:
 
 # === TAB 2: History & Edit ===
 with tab2:
-    st.markdown("### 🗓️ Workout History & Management")
+    st.markdown("### Workout History & Management")
     if not df_log.empty:
         # Pre-process Date
         df_log_history = df_log.copy()
@@ -620,7 +614,7 @@ with tab2:
 
 # === TAB 3: Templates ===
 with tab3:
-    st.markdown("### 📋 Templates Management")
+    st.markdown("### Templates Management")
     
     # --- Template Creation (Top of tab) ---
     with st.expander("➕ Create New Template", expanded=df_templates.empty):
@@ -676,7 +670,7 @@ with tab3:
                     st.error(f"Failed to save template: {e}")
 
     st.divider()
-    st.markdown("### 📋 Saved Templates")
+    st.markdown("### Saved Templates")
     if not df_templates.empty:
         df_temp_display = df_templates.copy()
         
