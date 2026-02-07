@@ -248,7 +248,7 @@ if submitted:
 # --- Dashboard View ---
 st.subheader("📊 Progress & History")
 
-tab1, tab2 = st.tabs(["📈 Analysis", "📅 History & Edit"])
+tab1, tab2, tab3 = st.tabs(["📈 Analysis", "📅 History & Edit", "💪 Exercise Master"])
 
 # === TAB 1: Analysis ===
 with tab1:
@@ -311,8 +311,8 @@ with tab1:
                     hover_data=['Set #', 'Reps', 'Weight', 'RPE', 'Memo'],
                     title=f"{selected_chart_exercise} - Performance Analysis"
                 )
-                fig.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
-                fig.update_layout(hovermode="closest")
+                fig.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey'), sizeref=2.0 * max(df_chart['Reps'])))
+                fig.update_layout(hovermode="closest", showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
                 
                 st.info("💡 **Chart Legend**: \n- **Circle Size**: Larger circle = More Reps \n- **Color**: Lighter/Yellow = Higher Intensity (Estimated 1RM)")
@@ -333,26 +333,59 @@ with tab1:
 with tab2:
     st.markdown("### 🗓️ Workout History & Management")
     if not df_log.empty:
-        # Pre-process Date for sorting and filtering
-        # Ensure we work with datetime objects for sorting
+        # Pre-process Date
         df_log_history = df_log.copy()
         if not pd.api.types.is_datetime64_any_dtype(df_log_history['Date']):
              df_log_history['Date'] = pd.to_datetime(df_log_history['Date'], errors='coerce')
 
-        # Get unique dates present in the data for filtering
-        available_dates = sorted(df_log_history['Date'].dropna().dt.date.unique(), reverse=True)
-        date_options = ["All Time"] + available_dates
+        # Create Date Summary for Selection
+        # Group by Date and count sets
+        df_date_summary = df_log_history.groupby(df_log_history['Date'].dt.date).size().reset_index(name='Sets')
+        df_date_summary.columns = ['Date', 'Sets']
+        df_date_summary = df_date_summary.sort_values('Date', ascending=False)
         
-        # Filter Selection
-        col_d1, col_d2 = st.columns([1, 2])
-        with col_d1:
-            selected_date_opt = st.selectbox("Filter by Date", date_options)
+        col_list, col_details = st.columns([1, 2])
         
-        # Apply Filter
-        if selected_date_opt != "All Time":
-            df_display = df_log_history[df_log_history['Date'].dt.date == selected_date_opt]
+        with col_list:
+            st.markdown("#### Select Date")
+            st.caption("Select a row to filter logs.")
+            
+            # Configure dataframe selection
+            event = st.dataframe(
+                df_date_summary,
+                on_select="rerun",
+                selection_mode="single-row",
+                hide_index=True,
+                column_config={
+                    "Date": st.column_config.DateColumn("Date", format="YYYY/MM/DD"),
+                    "Sets": st.column_config.NumberColumn("Sets"),
+                }
+            )
+            
+            selected_indices = event.selection.rows
+            if selected_indices:
+                # Get selected date from sorted dataframe
+                # selected_indices returns list of integers relative to displayed order?
+                # st.dataframe selection returns row index integer based on the dataframe passed.
+                # Since we passed df_date_summary, we use iloc.
+                selected_row_idx = selected_indices[0]
+                selected_date = df_date_summary.iloc[selected_row_idx]['Date']
+                filter_mode = "Specific Date"
+            else:
+                selected_date = None
+                filter_mode = "All Time"
+                st.info("Showing all history (Select a date to filter)")
+
+        # Filter Logic
+        if filter_mode == "Specific Date" and selected_date:
+            with col_details:
+                st.markdown(f"#### 📅 {selected_date.strftime('%Y/%m/%d')}")
+                df_display = df_log_history[df_log_history['Date'].dt.date == selected_date]
         else:
-            df_display = df_log_history
+            with col_details:
+                if filter_mode == "All Time":
+                    st.markdown("#### All Records")
+                df_display = df_log_history
 
         if df_display.empty:
             st.info("No logs found.")
@@ -452,3 +485,56 @@ with tab2:
                         st.error(f"Failed to delete rows: {e}")
     else:
         st.info("No data available.")
+
+# === TAB 3: Exercise Master ===
+with tab3:
+    st.markdown("### 💪 Exercise Master")
+    if not df_master.empty:
+        # Prepare for Editor
+        # We want to edit Description.
+        # ID is hidden. Name/Target read-only.
+        
+        # Ensure description exists
+        if 'description' not in df_master.columns:
+            df_master['description'] = ""
+            
+        edited_master = st.data_editor(
+            df_master,
+            hide_index=True,
+            column_config={
+                "exercise_id": None, # Hide
+                "exercise_name": st.column_config.TextColumn("Exercise Name", disabled=True),
+                "target_muscle_group": st.column_config.TextColumn("Target Muscle", disabled=True),
+                "description": st.column_config.TextColumn("Description (Editable)"),
+                "image_url": st.column_config.ImageColumn("Image", help="Image URL") if "image_url" in df_master.columns else None
+            },
+            disabled=["exercise_id", "exercise_name", "target_muscle_group"],
+            key="master_editor",
+            use_container_width=True
+        )
+        
+        if st.button("💾 Save Changes to Master", type="primary"):
+            try:
+                # Update GSheet
+                ws_master = sh.worksheet(SHEET_EXERCISE_MASTER)
+                
+                # We need to write back the entire dataframe or just changes.
+                # Writing back entire dataframe is safest for consistency if size is small.
+                
+                # Check for columns
+                headers = edited_master.columns.tolist()
+                data_to_write = [headers] + edited_master.values.tolist()
+                
+                ws_master.clear()
+                ws_master.update(range_name='A1', values=data_to_write, value_input_option='USER_ENTERED')
+                
+                st.success("Exercise Master updated successfully!")
+                time.sleep(1)
+                st.cache_data.clear()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to save changes: {e}")
+            
+    else:
+        st.info("Exercise Master data not found.")
+
