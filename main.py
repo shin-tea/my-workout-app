@@ -24,9 +24,9 @@ st.title("🏋️ Workout Tracker")
 st.markdown(
     """
     <style>
-    /* Disable search input in selectboxes to prevent mobile keyboard from popping up */
+    /* Hide search input in selectboxes to prevent mobile keyboard from popping up */
     .stSelectbox div[data-baseweb="select"] input {
-        pointer-events: none;
+        display: none !important;
     }
     </style>
     """,
