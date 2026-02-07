@@ -212,59 +212,6 @@ else:
     # Exercise Selector
     selected_exercise = st.sidebar.selectbox("Exercise", filtered_options)
 
-# --- Template Creation ---
-with st.sidebar.expander("📁 Manage Templates"):
-    st.markdown("### Create New Template")
-    new_template_name = st.text_input("Template Name", placeholder="e.g., Chest Day")
-    
-    # Multiple Exercise Selection
-    # Use the same filtering logic for template creation
-    create_muscle_filter = st.selectbox("Filter Exercises by Muscle", ["All"] + muscle_groups_input, key="create_template_muscle")
-    options_to_select = exercise_options
-    if create_muscle_filter != "All":
-        options_to_select = [ex for ex in exercise_options if exercise_map.get(ex, {}).get('target_muscle_group') == create_muscle_filter]
-    
-    selected_exercises_for_template = st.multiselect("Select Exercises", options_to_select)
-    
-    if st.button("Save Template", type="primary", use_container_width=True):
-        if not new_template_name:
-            st.error("Please enter a template name.")
-        elif not selected_exercises_for_template:
-            st.error("Please select at least one exercise.")
-        else:
-            try:
-                # Generate IDs
-                ex_ids = [str(exercise_map.get(ex, {}).get('exercise_id', '')) for ex in selected_exercises_for_template]
-                ex_ids_str = ",".join(ex_ids)
-                
-                # New ID
-                if df_templates.empty:
-                    new_tid = "TMP001"
-                else:
-                    last_id = df_templates['template_id'].iloc[-1]
-                    try:
-                        num = int(last_id.replace("TMP", "")) + 1
-                        new_tid = f"TMP{num:03d}"
-                    except:
-                        new_tid = f"TMP{len(df_templates)+1:03d}"
-                
-                new_template_row = [
-                    new_tid,
-                    new_template_name,
-                    ex_ids_str,
-                    datetime.date.today().strftime("%Y/%m/%d")
-                ]
-                
-                ws_templates = sh.worksheet(SHEET_TEMPLATE_MASTER)
-                ws_templates.append_row(new_template_row, value_input_option='USER_ENTERED')
-                
-                st.success(f"Template '{new_template_name}' saved!")
-                time.sleep(1)
-                st.cache_data.clear()
-                st.rerun()
-            except Exception as e:
-                st.error(f"Failed to save template: {e}")
-
 # --- Logic: Handle Set # Reset on Exercise Change ---
 if 'last_exercise' not in st.session_state:
     st.session_state['last_exercise'] = None
@@ -662,6 +609,62 @@ with tab2:
 
 # === TAB 3: Templates ===
 with tab3:
+    st.markdown("### 📋 Templates Management")
+    
+    # --- Template Creation (Top of tab) ---
+    with st.expander("➕ Create New Template", expanded=df_templates.empty):
+        col_name, col_muscle = st.columns(2)
+        with col_name:
+            new_template_name = st.text_input("Template Name", placeholder="e.g., Chest Day", key="tab_template_name")
+        with col_muscle:
+            create_muscle_filter = st.selectbox("Filter Exercises by Muscle", ["All"] + muscle_groups_input, key="tab_create_template_muscle")
+            
+        options_to_select = exercise_options
+        if create_muscle_filter != "All":
+            options_to_select = [ex for ex in exercise_options if exercise_map.get(ex, {}).get('target_muscle_group') == create_muscle_filter]
+        
+        selected_exercises_for_template = st.multiselect("Select Exercises (Order is preserved)", options_to_select, key="tab_template_exercises")
+        
+        if st.button("Save Template", type="primary"):
+            if not new_template_name:
+                st.error("Please enter a template name.")
+            elif not selected_exercises_for_template:
+                st.error("Please select at least one exercise.")
+            else:
+                try:
+                    # Generate IDs
+                    ex_ids = [str(exercise_map.get(ex, {}).get('exercise_id', '')) for ex in selected_exercises_for_template]
+                    ex_ids_str = ",".join(ex_ids)
+                    
+                    # New ID
+                    if df_templates.empty:
+                        new_tid = "TMP001"
+                    else:
+                        last_id = df_templates['template_id'].iloc[-1]
+                        try:
+                            num = int(last_id.replace("TMP", "")) + 1
+                            new_tid = f"TMP{num:03d}"
+                        except:
+                            new_tid = f"TMP{len(df_templates)+1:03d}"
+                    
+                    new_template_row = [
+                        new_tid,
+                        new_template_name,
+                        ex_ids_str,
+                        datetime.date.today().strftime("%Y/%m/%d")
+                    ]
+                    
+                    ws_templates = sh.worksheet(SHEET_TEMPLATE_MASTER)
+                    ws_templates.append_row(new_template_row, value_input_option='USER_ENTERED')
+                    
+                    st.success(f"Template '{new_template_name}' saved!")
+                    time.sleep(1)
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to save template: {e}")
+
+    st.divider()
     st.markdown("### 📋 Saved Templates")
     if not df_templates.empty:
         df_temp_display = df_templates.copy()
@@ -671,7 +674,6 @@ with tab3:
             df_temp_display.insert(0, "Delete", False)
             
         # Display template list with detail
-        # We want to show exercise names instead of just IDs if possible
         def get_exercise_names(ids_str):
             ids = str(ids_str).split(',')
             names = []
@@ -692,7 +694,7 @@ with tab3:
             column_config={
                 "Delete": st.column_config.CheckboxColumn("❌", width="small", default=False),
                 "template_id": st.column_config.TextColumn("ID", disabled=True),
-                "template_name": st.column_config.TextColumn("Template Name", disabled=True),
+                "template_name": st.column_config.TextColumn("Template Name", width="medium"),
                 "exercise_ids": None, # Hide raw IDs
                 "created_at": st.column_config.TextColumn("Created At", disabled=True),
                 "Exercises": st.column_config.TextColumn("Exercises", width="large", disabled=True),
@@ -707,7 +709,6 @@ with tab3:
             else:
                 try:
                     ws_temp = sh.worksheet(SHEET_TEMPLATE_MASTER)
-                    # We need to rewrite the sheet excluding deleted IDs
                     df_remaining_templates = df_templates[~df_templates['template_id'].isin(ids_to_del)]
                     
                     ws_temp.clear()
@@ -722,5 +723,5 @@ with tab3:
                 except Exception as e:
                     st.error(f"Failed to delete templates: {e}")
     else:
-        st.info("No templates saved yet. Create one in the sidebar!")
+        st.info("No templates saved yet.")
 
