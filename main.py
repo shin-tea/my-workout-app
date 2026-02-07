@@ -150,6 +150,21 @@ def normalize_id(val):
         return s[:-2]
     return s
 
+if st.sidebar.checkbox("🐞 Enable ID Debugging"):
+    st.sidebar.write("### 🐞 ID Sync Debug")
+    st.sidebar.write("df_master Columns:", df_master.columns.tolist())
+    if not df_master.empty:
+        st.sidebar.write("df_master First Row:", df_master.iloc[0].to_dict())
+    
+    if not df_templates.empty:
+        st.sidebar.write("Raw Template IDs (first template):", df_templates.iloc[0].get('exercise_ids'))
+        st.sidebar.write("Normalized Template IDs:", [normalize_id(eid) for eid in str(df_templates.iloc[0].get('exercise_ids', '')).split(',')])
+    if 'exercise_map' in locals() and exercise_map:
+        first_ex_name = list(exercise_map.keys())[0]
+        first_ex_id = exercise_map[first_ex_name].get('exercise_id')
+        st.sidebar.write(f"Master Example ({first_ex_name}) ID:", first_ex_id)
+        st.sidebar.write("Normalized Master ID:", normalize_id(first_ex_id))
+
 selected_template_option = st.sidebar.selectbox("Use Template", template_options, key="template_selector")
 
 # Session state for template workflow
