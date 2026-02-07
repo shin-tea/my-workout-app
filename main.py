@@ -308,7 +308,7 @@ with tab1:
                     y='Weight (kg)',
                     size='Reps',
                     color='Estimated 1RM (kg)', # Color by intensity
-                    hover_data=['Set #', 'Reps', 'Weight', 'RPE', 'Memo'],
+                    hover_data={'Set #': True, 'Reps': True, 'Weight': ':.1f', 'RPE': True, 'Memo': True, 'Estimated 1RM (kg)': ':.1f'},
                     title=f"{selected_chart_exercise} - Performance Analysis"
                 )
                 fig.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey'), sizeref=0.5, sizemin=8))
