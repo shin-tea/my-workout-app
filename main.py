@@ -18,7 +18,7 @@ SCOPES = [
 ]
 
 st.set_page_config(page_title="Workout Tracker", layout="wide", page_icon="💪")
-# st.title("🏋️ Workout Tracker")
+st.title("Workout Tracker")
 
 
 # --- Success Message Logic ---
@@ -110,7 +110,8 @@ if df_master.empty or df_constants.empty:
         st.warning("Could not load Master or Constants data. Please check the spreadsheet.")
     st.stop()
 
-# --- Pre-process Data ---
+# --- Sidebar: Input Form ---
+st.sidebar.header("Log Workout")
 # 1. Constants Map
 # Structure: Category | Value
 try:
@@ -336,6 +337,7 @@ tab1, tab2, tab3 = st.tabs(["Analysis", "History & Edit", "Templates"])
 
 # === TAB 1: Analysis ===
 with tab1:
+    st.markdown("### Performance Analysis & Metrics")
     if not df_log.empty:
         # Correct Types for display/plotting
         df_log['Date'] = pd.to_datetime(df_log['Date'], errors='coerce')
