@@ -157,7 +157,7 @@ with st.sidebar.form("log_form"):
         # Value is controlled by st.session_state['set_num_input']
         set_num = st.number_input("Set #", min_value=1, step=1, key="set_num_input")
         
-    rpe = st.number_input("RPE (1-10)", min_value=0.0, max_value=10.0, step=0.5, value=8.0)
+    rpe = st.number_input("RPE (1-10)", min_value=1.0, max_value=10.0, step=0.5, value=None)
     set_type = st.selectbox("Set Type", set_types, index=0 if 'Main' in set_types else 0)
     memo = st.text_area("Memo", height=2)
     
@@ -187,7 +187,7 @@ if submitted:
         "Weight": float(weight),
         "Unit": unit,
         "Reps": int(reps),
-        "RPE": float(rpe),
+        "RPE": float(rpe) if rpe is not None else "",
         "Set Type": set_type,
         "Memo": memo
     }
