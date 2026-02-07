@@ -18,7 +18,7 @@ SCOPES = [
 ]
 
 st.set_page_config(page_title="Workout Tracker", layout="wide", page_icon="💪")
-st.title("🏋️ Workout Tracker")
+# st.title("🏋️ Workout Tracker")
 
 
 # --- Success Message Logic ---
@@ -132,7 +132,7 @@ else:
     st.stop()
 
 # --- Sidebar: Input Form ---
-st.sidebar.header("📝 Log Workout")
+# st.sidebar.header("📝 Log Workout")
 
 # --- Template Selection (Optional) ---
 template_options = ["Select from Exercises"]
@@ -336,7 +336,7 @@ if submitted:
         st.error(f"Failed to update spreadsheet: {e}")
 
 # --- Dashboard View ---
-st.subheader("📊 Progress & History")
+# st.subheader("📊 Progress & History")
 
 tab1, tab2, tab3 = st.tabs(["📈 Analysis", "📅 History & Edit", "📋 Templates"])
 
