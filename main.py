@@ -311,7 +311,7 @@ with tab1:
                     hover_data=['Set #', 'Reps', 'Weight', 'RPE', 'Memo'],
                     title=f"{selected_chart_exercise} - Performance Analysis"
                 )
-                fig.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey'), sizeref=2.0 * max(df_chart['Reps'])))
+                fig.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey'), sizeref=0.5, sizemin=8))
                 fig.update_layout(hovermode="closest", showlegend=False, coloraxis_showscale=False)
                 st.plotly_chart(fig, use_container_width=True)
                 
@@ -418,7 +418,7 @@ with tab2:
         # Filter Logic & Display
         with col_details:
             if not selected_dates:
-                 st.info("👈 Select dates from the left to view logs.")
+                 pass  # Show nothing until dates are selected
             else:
                 # Filter for ALL selected dates
                 df_display = df_log_history[df_log_history['Date'].dt.date.isin(selected_dates)]
