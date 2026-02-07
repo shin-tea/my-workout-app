@@ -3,6 +3,7 @@ import pandas as pd
 import datetime
 import plotly.express as px
 import gspread
+import time
 from google.oauth2.service_account import Credentials
 
 # --- Constants & Config ---
@@ -245,93 +246,192 @@ if submitted:
         st.error(f"Failed to update spreadsheet: {e}")
 
 # --- Dashboard View ---
-# Filter Section
-st.subheader("📊 Progress Dashboard")
+st.subheader("📊 Progress & History")
 
-if not df_log.empty:
-    # Correct Types for display/plotting
-    df_log['Date'] = pd.to_datetime(df_log['Date'], errors='coerce')
-    df_log['Weight'] = pd.to_numeric(df_log['Weight'], errors='coerce').fillna(0)
-    df_log['Reps'] = pd.to_numeric(df_log['Reps'], errors='coerce').fillna(0)
+tab1, tab2 = st.tabs(["📈 Analysis", "📅 History & Edit"])
 
-    # Calculate Derived Columns
-    df_log['Weight (kg)'] = df_log.apply(
-        lambda x: x['Weight'] * 0.453592 if str(x.get('Unit', '')).lower() == 'lbs' else x['Weight'], 
-        axis=1
-    )
-    df_log['Estimated 1RM (kg)'] = df_log['Weight (kg)'] * (1 + df_log['Reps'] / 30.0)
-    
-    # Filter by Exercise
-    unique_exercises = sorted(df_log['Exercise'].astype(str).unique().tolist())
-    
-    # --- Muscle Group Filter ---
-    # Get distinct muscle groups from Master
-    if 'target_muscle_group' in df_master.columns:
-        muscle_groups = sorted(df_master['target_muscle_group'].dropna().unique().tolist())
-        selected_muscle = st.selectbox("Filter by Muscle Group", ["All"] + muscle_groups)
-        
-        if selected_muscle != "All":
-            # Filter exercises that belong to the selected muscle group
-            # We use exercise_map which maps exercise name -> info dict
-            filtered_exercises = []
-            for ex in unique_exercises:
-                # Get muscle group for this logged exercise
-                # Note: exercise_map keys are exercise names
-                info = exercise_map.get(ex)
-                if info and info.get('target_muscle_group') == selected_muscle:
-                    filtered_exercises.append(ex)
-            unique_exercises = filtered_exercises
-    # ---------------------------
-
-    # Default selection: most recently logged exercise (if in list)
-    default_idx = 0
+# === TAB 1: Analysis ===
+with tab1:
     if not df_log.empty:
-        last_ex = df_log.iloc[-1]['Exercise']
-        if last_ex in unique_exercises:
-            default_idx = unique_exercises.index(last_ex)
-            
-    selected_chart_exercise = st.selectbox("Select Exercise to Visualize", unique_exercises, index=default_idx)
-    
-    if selected_chart_exercise:
-        df_chart = df_log[df_log['Exercise'] == selected_chart_exercise].copy()
-        df_chart = df_chart.dropna(subset=['Date'])
+        # Correct Types for display/plotting
+        df_log['Date'] = pd.to_datetime(df_log['Date'], errors='coerce')
+        df_log['Weight'] = pd.to_numeric(df_log['Weight'], errors='coerce').fillna(0)
+        df_log['Reps'] = pd.to_numeric(df_log['Reps'], errors='coerce').fillna(0)
+
+        # Calculate Derived Columns
+        df_log['Weight (kg)'] = df_log.apply(
+            lambda x: x['Weight'] * 0.453592 if str(x.get('Unit', '')).lower() == 'lbs' else x['Weight'], 
+            axis=1
+        )
+        df_log['Estimated 1RM (kg)'] = df_log['Weight (kg)'] * (1 + df_log['Reps'] / 30.0)
         
-        if df_chart.empty:
-             st.info("No valid records for this exercise.")
-        else:
-            # Aggregations per day for the chart (Max 1RM, Max Weight)
-            df_daily = df_chart.groupby('Date').agg({
-                'Estimated 1RM (kg)': 'max',
-                'Weight (kg)': 'max',
-                'Reps': 'max'
-            }).reset_index()
+        # Filter by Exercise
+        unique_exercises = sorted(df_log['Exercise'].astype(str).unique().tolist())
+        
+        # --- Muscle Group Filter ---
+        if 'target_muscle_group' in df_master.columns:
+            muscle_groups = sorted(df_master['target_muscle_group'].dropna().unique().tolist())
+            col_m_filter, _ = st.columns([1, 2])
+            with col_m_filter:
+                selected_muscle = st.selectbox("Dashboard Filter: Muscle Group", ["All"] + muscle_groups, key="dash_muscle_filter")
             
-            # Plotly Line Chart
-            fig = px.line(
-                df_daily, 
-                x='Date', 
-                y=['Estimated 1RM (kg)', 'Weight (kg)'],
-                markers=True,
-                title=f"{selected_chart_exercise} - Max Daily Performance"
-            )
-            fig.update_layout(hovermode="x unified")
-            st.plotly_chart(fig, use_container_width=True)
+            if selected_muscle != "All":
+                filtered_exercises = []
+                for ex in unique_exercises:
+                    info = exercise_map.get(ex)
+                    if info and info.get('target_muscle_group') == selected_muscle:
+                        filtered_exercises.append(ex)
+                unique_exercises = filtered_exercises
+        # ---------------------------
+
+        # Default selection
+        default_idx = 0
+        if not df_log.empty:
+            last_ex = df_log.iloc[-1]['Exercise']
+            if last_ex in unique_exercises:
+                default_idx = unique_exercises.index(last_ex)
+                
+        selected_chart_exercise = st.selectbox("Select Exercise to Visualize", unique_exercises, index=default_idx, key="chart_ex_select")
+        
+        if selected_chart_exercise:
+            df_chart = df_log[df_log['Exercise'] == selected_chart_exercise].copy()
+            df_chart = df_chart.dropna(subset=['Date'])
             
-            # Metrics
-            col1, col2, col3 = st.columns(3)
-            max_1rm = df_chart['Estimated 1RM (kg)'].max()
-            max_weight = df_chart['Weight (kg)'].max()
-            total_sets = len(df_chart)
-            
-            col1.metric("Personal Best (1RM)", f"{max_1rm} kg")
-            col2.metric("Max Weight Lifted", f"{max_weight} kg")
-            col3.metric("Total Sets Logged", total_sets)
-            
-            # Log Table
-            with st.expander(f"See Detailed Logs for {selected_chart_exercise}"):
-                st.dataframe(
-                    df_chart.sort_values(by=['Date', 'Set #'], ascending=[False, True])
-                    .style.format({"Weight": "{:.1f}", "Estimated 1RM (kg)": "{:.1f}"})
+            if df_chart.empty:
+                 st.info("No valid records for this exercise.")
+            else:
+                # Remove Daily Aggregation to show ALL sets
+                # Plotly Scatter Chart
+                fig = px.scatter(
+                    df_chart, 
+                    x='Date', 
+                    y='Weight (kg)',
+                    size='Reps',
+                    color='Estimated 1RM (kg)', # Color by intensity
+                    hover_data=['Set #', 'Reps', 'Weight', 'RPE', 'Memo'],
+                    title=f"{selected_chart_exercise} - All Sets (Size=Reps, Color=1RM)"
                 )
-else:
-    st.info("No training data available yet. Add your first workout on the left!")
+                fig.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
+                fig.update_layout(hovermode="closest")
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Metrics
+                col1, col2, col3 = st.columns(3)
+                max_1rm = df_chart['Estimated 1RM (kg)'].max()
+                max_weight = df_chart['Weight (kg)'].max()
+                total_sets = len(df_chart)
+                
+                col1.metric("Personal Best (1RM)", f"{max_1rm:.1f} kg")
+                col2.metric("Max Weight Lifted", f"{max_weight:.1f} kg")
+                col3.metric("Total Sets Logged", total_sets)
+    else:
+        st.info("No training data available yet.")
+
+# === TAB 2: History & Edit ===
+with tab2:
+    st.markdown("### 🗓️ Workout History & Management")
+    if not df_log.empty:
+        # Date Filter
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            # Default to showing last 30 days or similar? Or just a date picker.
+            # Let's allow picking a specific date to see logs, OR 'All'
+            filter_mode = st.radio("Filter Mode", ["All Time", "Specific Date"], horizontal=True)
+        
+        df_history = df_log.copy()
+        
+        if filter_mode == "Specific Date":
+            with col_d2:
+                selected_history_date = st.date_input("Select Date", datetime.date.today())
+            # Filter
+            # df_log['Date'] is already datetime due to Tab 1 processing if we did it globally,
+            # but let's re-ensure or use string comparison if safer.
+            # We already did pd.to_datetime in Tab 1 scope. DataFrame is mutable? 
+            # Safe to convert again or ensure.
+            df_history['Date'] = pd.to_datetime(df_history['Date'])
+            df_history = df_history[df_history['Date'].dt.date == selected_history_date]
+        
+        if df_history.empty:
+            st.info("No logs found for selection.")
+        else:
+            # Sort by Date desc, ID desc
+            df_history = df_history.sort_values(by=['Date', 'ID'], ascending=[False, False])
+            
+            # Prepare for Editor
+            # Add a 'Delete' column initialized to False
+            df_history.insert(0, "Delete", False)
+            
+            # Show Data Editor
+            st.caption("check 'Delete' box and click the button below to remove records.")
+            edited_df = st.data_editor(
+                df_history,
+                hide_index=True,
+                column_config={
+                    "Delete": st.column_config.CheckboxColumn(
+                        "Delete?",
+                        help="Select rows to delete",
+                        default=False,
+                    ),
+                    "ID": st.column_config.NumberColumn("ID", disabled=True),
+                    "Date": st.column_config.DateColumn("Date", format="YYYY/MM/DD", disabled=True),
+                    "Exercise": st.column_config.TextColumn("Exercise", disabled=True),
+                    # Make other columns editable? Maybe later. For now just Delete.
+                },
+                disabled=["ID", "Date", "Exercise", "Target", "Set #", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"],
+                key="history_editor"
+            )
+            
+            # Process Deletion
+            if st.button("🗑️ Delete Selected Rows", type="primary"):
+                # Identify rows where Delete is True
+                rows_to_delete = edited_df[edited_df['Delete'] == True]
+                
+                if rows_to_delete.empty:
+                    st.warning("No rows selected for deletion.")
+                else:
+                    ids_to_delete = rows_to_delete['ID'].tolist()
+                    st.write(f"Deleting IDs: {ids_to_delete}")
+                    
+                    try:
+                        # 1. Reload latest data from sheet to ensure sync (optimistic locking)
+                        ws_log_current = sh.worksheet(SHEET_TRAINING_LOG)
+                        current_data = ws_log_current.get_all_records()
+                        df_current = pd.DataFrame(current_data)
+                        
+                        # 2. Filter out deleted IDs
+                        # Ensure ID type match
+                        if 'ID' in df_current.columns:
+                            df_current['ID'] = pd.to_numeric(df_current['ID'], errors='coerce').fillna(0).astype(int)
+                            
+                        df_remaining = df_current[~df_current['ID'].isin(ids_to_delete)]
+                        
+                        # 3. Rewrite Sheet
+                        # Method: Clear and Append
+                        ws_log_current.clear()
+                        
+                        # Prepare data
+                        # Keep headers
+                        headers = df_current.columns.tolist() if not df_current.empty else []
+                        if not headers:
+                            # Fallback if sheet was somehow empty but code ran? Unlikely.
+                            headers = ["ID", "Date", "ExerciseID", "Target", "Exercise", "Set #", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"]
+
+                        # Convert Date format in df_remaining back to string if needed?
+                        # get_all_records returns strings generally.
+                        # But we didn't convert df_current['Date'] to datetime, so it should be original string.
+                        # EXCEPT if we want to ensure standard formatting.
+                        # Let's write `df_remaining` values.
+                        
+                        update_data = [headers] + df_remaining.values.tolist()
+                        
+                        ws_log_current.update(range_name='A1', values=update_data, value_input_option='USER_ENTERED')
+                        
+                        st.success(f"Deleted {len(ids_to_delete)} records.")
+                        time.sleep(1) # Give a moment to see
+                        st.cache_data.clear()
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"Failed to delete rows: {e}")
+    else:
+        st.info("No data available.")
