@@ -20,19 +20,6 @@ SCOPES = [
 st.set_page_config(page_title="Workout Tracker", layout="wide", page_icon="💪")
 st.title("🏋️ Workout Tracker")
 
-# --- Global CSS for UI Polish ---
-st.markdown(
-    """
-    <style>
-    /* Make radio buttons more compact in the sidebar */
-    [data-testid="stSidebar"] .stRadio label {
-        padding-top: 2px !important;
-        padding-bottom: 2px !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
 
 # --- Success Message Logic ---
 if 'success_msg' in st.session_state and st.session_state['success_msg']:
@@ -212,7 +199,7 @@ if using_template and exercise_ids_in_template:
             current_idx = 0
             st.session_state['template_current_idx'] = 0
         
-        selected_exercise = st.sidebar.radio(
+        selected_exercise = st.sidebar.selectbox(
             "Exercise (Template Order)", 
             template_exercise_names, 
             index=current_idx,
@@ -233,8 +220,8 @@ else:
     if selected_muscle_input != "All":
         filtered_options = [ex for ex in exercise_options if exercise_map.get(ex, {}).get('target_muscle_group') == selected_muscle_input]
     
-    # Exercise Selector (Radio to prevent mobile keyboard)
-    selected_exercise = st.sidebar.radio("Exercise", filtered_options)
+    # Exercise Selector
+    selected_exercise = st.sidebar.selectbox("Exercise", filtered_options)
 
 # --- Logic: Handle Set # Reset on Exercise Change ---
 if 'last_exercise' not in st.session_state:
