@@ -315,12 +315,14 @@ with tab1:
                     marker=dict(line=dict(width=1, color='DarkSlateGrey'), sizeref=0.5, sizemin=8),
                     hovertemplate=(
                         "<b>%{x|%Y/%m/%d}</b><br>"
-                        "Weight:&nbsp;%{customdata[2]:.1f} kg<br>"
-                        "Reps:&nbsp;&nbsp;&nbsp;%{customdata[1]}<br>"
-                        "Set #:&nbsp;&nbsp;%{customdata[0]}<br>"
-                        "RPE:&nbsp;&nbsp;&nbsp;&nbsp;%{customdata[3]}<br>"
-                        "1RM:&nbsp;&nbsp;&nbsp;&nbsp;%{customdata[5]:.1f} kg<br>"
-                        "Memo:&nbsp;&nbsp;&nbsp;%{customdata[4]}"
+                        "<table>"
+                        "<tr><td>Weight</td><td>:</td><td>%{customdata[2]:.1f} kg</td></tr>"
+                        "<tr><td>Reps</td><td>:</td><td>%{customdata[1]}</td></tr>"
+                        "<tr><td>Set #</td><td>:</td><td>%{customdata[0]}</td></tr>"
+                        "<tr><td>RPE</td><td>:</td><td>%{customdata[3]}</td></tr>"
+                        "<tr><td>1RM</td><td>:</td><td>%{customdata[5]:.1f} kg</td></tr>"
+                        "<tr><td>Memo</td><td>:</td><td>%{customdata[4]}</td></tr>"
+                        "</table>"
                         "<extra></extra>"
                     )
                 )
