@@ -18,6 +18,12 @@ SCOPES = [
 st.set_page_config(page_title="Workout Tracker", layout="wide", page_icon="💪")
 st.title("🏋️ Workout Tracker")
 
+# --- Success Message Logic ---
+if 'success_msg' in st.session_state and st.session_state['success_msg']:
+    st.success(st.session_state['success_msg'])
+    del st.session_state['success_msg']
+# -----------------------------
+
 # --- Connection ---
 @st.cache_resource
 def init_connection():
@@ -226,7 +232,8 @@ if submitted:
             
         ws_log.append_rows(rows_to_append, value_input_option='USER_ENTERED')
         
-        st.success(f"Running: Added Set #{set_num} of {selected_exercise}!")
+        # Store success message in session state for display after rerun
+        st.session_state['success_msg'] = f"Running: Added Set #{set_num} of {selected_exercise}!"
         
         # Increment Set # for next log
         st.session_state['set_input_val'] = int(set_num) + 1
