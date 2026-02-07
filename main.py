@@ -619,7 +619,7 @@ with tab3:
     st.markdown("### Templates Management")
     
     # --- Template Creation (Top of tab) ---
-    with st.expander("➕ Create New Template", expanded=df_templates.empty):
+    with st.expander("Create New Template", expanded=df_templates.empty):
         col_name, col_muscle = st.columns(2)
         with col_name:
             new_template_name = st.text_input("Template Name", placeholder="e.g., Chest Day", key="tab_template_name")
