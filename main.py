@@ -140,7 +140,7 @@ if st.session_state['last_exercise'] != selected_exercise:
 
 with st.sidebar.form("log_form"):
     # Date
-    date_val = st.date_input("Date", datetime.date.today())
+    date_val = st.date_input("Date", datetime.date.today(), format="YYYY/MM/DD")
     
     # Stats
     col_w, col_u = st.columns([2, 1])
@@ -179,7 +179,7 @@ if submitted:
     # Single record per click
     row = {
         "ID": int(start_id),
-        "Date": date_val.strftime("%Y-%m-%d"),
+        "Date": date_val.strftime("%Y/%m/%d"),
         "ExerciseID": ex_id,
         "Target": target_muscle,
         "Exercise": selected_exercise,
