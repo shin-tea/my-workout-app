@@ -141,7 +141,7 @@ if not df_templates.empty and 'template_name' in df_templates.columns:
         tname = row.get('template_name', '')
         if tname:
             template_options.append(f"📋 {tname}")
-            template_map[tname] = row.get('exercise_ids', '').split(',') if row.get('exercise_ids') else []
+            template_map[tname] = str(row.get('exercise_ids', '')).split(',') if row.get('exercise_ids') else []
 
 selected_template_option = st.sidebar.selectbox("Use Template", template_options, key="template_selector")
 
@@ -669,7 +669,7 @@ with tab3:
         # Display template list with detail
         # We want to show exercise names instead of just IDs if possible
         def get_exercise_names(ids_str):
-            ids = ids_str.split(',')
+            ids = str(ids_str).split(',')
             names = []
             for eid in ids:
                 eid = eid.strip()
