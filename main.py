@@ -366,8 +366,6 @@ with tab1:
 
     else:
         st.info("No training data available yet.")
-    else:
-        st.info("No training data available yet.")
 
 # === TAB 2: History & Edit ===
 with tab2:
