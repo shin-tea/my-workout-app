@@ -248,7 +248,7 @@ if submitted:
 # --- Dashboard View ---
 st.subheader("📊 Progress & History")
 
-tab1, tab2, tab3 = st.tabs(["📈 Analysis", "📅 History & Edit", "💪 Exercise Master"])
+tab1, tab2 = st.tabs(["📈 Analysis", "📅 History & Edit"])
 
 # === TAB 1: Analysis ===
 with tab1:
@@ -312,10 +312,8 @@ with tab1:
                     title=f"{selected_chart_exercise} - Performance Analysis"
                 )
                 fig.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey'), sizeref=2.0 * max(df_chart['Reps'])))
-                fig.update_layout(hovermode="closest", showlegend=False)
+                fig.update_layout(hovermode="closest", showlegend=False, coloraxis_showscale=False)
                 st.plotly_chart(fig, use_container_width=True)
-                
-                st.info("💡 **Chart Legend**: \n- **Circle Size**: Larger circle = More Reps \n- **Color**: Lighter/Yellow = Higher Intensity (Estimated 1RM)")
                 
                 # Metrics
                 col1, col2, col3 = st.columns(3)
@@ -326,6 +324,48 @@ with tab1:
                 col1.metric("Personal Best (1RM)", f"{max_1rm:.1f} kg")
                 col2.metric("Max Weight Lifted", f"{max_weight:.1f} kg")
                 col3.metric("Total Sets Logged", total_sets)
+                
+                st.divider()
+                st.markdown("### ℹ️ Exercise Details & Notes")
+                
+                # Retrieve details from Master
+                ex_info = exercise_map.get(selected_chart_exercise, {})
+                
+                # Display Read-only fields
+                c1, c2, c3 = st.columns(3)
+                c1.markdown(f"**Sub Muscle:** {ex_info.get('sub_muscle_group', '-')}")
+                c2.markdown(f"**Equipment:** {ex_info.get('equipment_type', '-')}")
+                c3.markdown(f"**Category:** {ex_info.get('exercise_category', '-')}")
+                
+                # Editable Description
+                mask = df_master['exercise_name'] == selected_chart_exercise
+                if mask.any():
+                    original_idx = df_master.index[mask][0]
+                    current_desc = df_master.loc[original_idx, 'description']
+                    if pd.isna(current_desc): current_desc = ""
+                    
+                    new_desc = st.text_area("Description / Notes", value=str(current_desc), height=100, key="analysis_desc_edit")
+                    
+                    if st.button("💾 Save Description", key="save_desc_analysis"):
+                        try:
+                             df_master.at[original_idx, 'description'] = new_desc
+                             ws_master = sh.worksheet(SHEET_EXERCISE_MASTER)
+                             headers = df_master.columns.tolist()
+                             df_to_save = df_master.fillna("")
+                             data_to_write = [headers] + df_to_save.values.tolist()
+                             ws_master.clear()
+                             ws_master.update(range_name='A1', values=data_to_write, value_input_option='USER_ENTERED')
+                             st.success("Description updated!")
+                             time.sleep(1)
+                             st.cache_data.clear()
+                             st.rerun()
+                        except Exception as e:
+                            st.error(f"Save failed: {e}")
+                else:
+                    st.caption("Exercise not found in master database.")
+
+    else:
+        st.info("No training data available yet.")
     else:
         st.info("No training data available yet.")
 
@@ -347,14 +387,14 @@ with tab2:
         col_list, col_details = st.columns([1, 2])
         
         with col_list:
-            st.markdown("#### Select Date")
-            st.caption("Select a row to filter logs.")
+            st.markdown("#### Select Date(s)")
+            st.caption("Max 3 dates.")
             
             # Configure dataframe selection
             event = st.dataframe(
                 df_date_summary,
                 on_select="rerun",
-                selection_mode="single-row",
+                selection_mode="multi-row",
                 hide_index=True,
                 column_config={
                     "Date": st.column_config.DateColumn("Date", format="YYYY/MM/DD"),
@@ -362,30 +402,38 @@ with tab2:
                 }
             )
             
-            selected_indices = event.selection.rows
-            if selected_indices:
-                # Get selected date from sorted dataframe
-                # selected_indices returns list of integers relative to displayed order?
-                # st.dataframe selection returns row index integer based on the dataframe passed.
-                # Since we passed df_date_summary, we use iloc.
-                selected_row_idx = selected_indices[0]
-                selected_date = df_date_summary.iloc[selected_row_idx]['Date']
-                filter_mode = "Specific Date"
-            else:
-                selected_date = None
-                filter_mode = "All Time"
-                st.info("Showing all history (Select a date to filter)")
+            selected_rows = event.selection.rows
+            selected_dates = []
+            if selected_rows:
+                # Limit to 3
+                if len(selected_rows) > 3:
+                     st.warning("Max 3 dates allowed. Showing top 3 selected.")
+                     selected_rows = selected_rows[:3]
+                
+                for idx in selected_rows:
+                    selected_dates.append(df_date_summary.iloc[idx]['Date'])
+                
+                selected_dates.sort(reverse=True) # Show newest first or oldest? Oldest to newest seems better for flow.
+                # Actually user asked for Old->New in table. Let's keep dates sorted in list.
+                selected_dates.sort() 
 
-        # Filter Logic
-        if filter_mode == "Specific Date" and selected_date:
-            with col_details:
-                st.markdown(f"#### 📅 {selected_date.strftime('%Y/%m/%d')}")
-                df_display = df_log_history[df_log_history['Date'].dt.date == selected_date]
-        else:
-            with col_details:
-                if filter_mode == "All Time":
-                    st.markdown("#### All Records")
-                df_display = df_log_history
+        # Filter Logic & Display
+        with col_details:
+            if not selected_dates:
+                 st.info("👈 Select dates from the left to view logs.")
+            else:
+                # Filter for ALL selected dates
+                # But display them comfortably. Review logic for grouping.
+                # We reused logic: df_display is subset. 
+                # df_log_history['Date'].dt.date is the comparison key.
+                
+                df_display = df_log_history[df_log_history['Date'].dt.date.isin(selected_dates)]
+                
+                # Now we proceed to build the editors.
+                # The existing code loops through 'unique_display_dates' from 'df_display'.
+                # So this naturally handles multiple dates!
+                pass # variable df_display is set.
+
 
         if df_display.empty:
             st.info("No logs found.")
@@ -485,83 +533,4 @@ with tab2:
                         st.error(f"Failed to delete rows: {e}")
     else:
         st.info("No data available.")
-
-# === TAB 3: Exercise Master ===
-with tab3:
-    st.markdown("### 💪 Exercise Master")
-    if not df_master.empty:
-        # --- Filter Section ---
-        col_m, col_e = st.columns(2)
-        
-        # 1. Muscle Group Filter
-        unique_muscles = sorted(df_master['target_muscle_group'].dropna().unique().tolist())
-        with col_m:
-            selected_master_muscle = st.selectbox("Filter by Muscle", ["All"] + unique_muscles, key="master_muscle")
-            
-        # 2. Exercise Select
-        # Filter df based on muscle
-        if selected_master_muscle != "All":
-            df_master_filtered = df_master[df_master['target_muscle_group'] == selected_master_muscle]
-        else:
-            df_master_filtered = df_master
-            
-        unique_master_exercises = sorted(df_master_filtered['exercise_name'].unique().tolist())
-        
-        with col_e:
-            selected_master_exercise = st.selectbox("Select Exercise", unique_master_exercises, key="master_exercise")
-            
-        st.divider()
-        
-        # --- Detail/Edit Section ---
-        if selected_master_exercise:
-            # Get the specific row
-            # We use boolean indexing, assuming exercise names are unique or we take the first one.
-            # Using exercise_name is safer for the user selection.
-            # We need the index to update the original df_master later.
-            
-            # Find the row in the original df_master
-            # We use df_master.index[condition] to get the index label
-            mask = df_master['exercise_name'] == selected_master_exercise
-            if mask.any():
-                original_idx = df_master.index[mask][0]
-                row_data = df_master.loc[original_idx]
-                
-                st.markdown(f"#### 🏋️ {row_data['exercise_name']}")
-                st.caption(f"Target Muscle: **{row_data['target_muscle_group']}**")
-                
-                # Editable Fields
-                current_desc = row_data.get('description', "")
-                if pd.isna(current_desc): current_desc = ""
-                
-                new_desc = st.text_area("Description / Notes", value=str(current_desc), height=150)
-                
-                if st.button("💾 Save Changes", type="primary"):
-                    try:
-                        # Update local DF first
-                        df_master.at[original_idx, 'description'] = new_desc
-                        
-                        # Update GSheet
-                        # We will use the same full-overwrite strategy for simplicity and safety
-                        # ensuring we match the column order.
-                        ws_master = sh.worksheet(SHEET_EXERCISE_MASTER)
-                        headers = df_master.columns.tolist()
-                        # Replace NaNs with empty string for GSheet compatibility
-                        df_to_save = df_master.fillna("")
-                        data_to_write = [headers] + df_to_save.values.tolist()
-                        
-                        ws_master.clear()
-                        ws_master.update(range_name='A1', values=data_to_write, value_input_option='USER_ENTERED')
-                        
-                        st.success(f"Updated description for {selected_master_exercise}!")
-                        time.sleep(1)
-                        st.cache_data.clear()
-                        st.rerun()
-                        
-                    except Exception as e:
-                        st.error(f"Failed to save changes: {e}")
-            else:
-                 st.error("Selected exercise not found in data.")
-                 
-    else:
-        st.info("Exercise Master data not found.")
 
