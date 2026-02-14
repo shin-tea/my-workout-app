@@ -462,7 +462,7 @@ with tab1:
                     current_desc = df_master.loc[original_idx, 'description']
                     if pd.isna(current_desc): current_desc = ""
                     
-                    new_desc = st.text_area("Description / Notes", value=str(current_desc), height=100, key="analysis_desc_edit")
+                    new_desc = st.text_area("Description / Notes", value=str(current_desc), height=100, key=f"analysis_desc_edit_{selected_chart_exercise}")
                     
                     if st.button("Save Description", key="save_desc_analysis"):
                         try:
