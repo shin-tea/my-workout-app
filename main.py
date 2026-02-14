@@ -429,11 +429,12 @@ with tab1:
                 col2.metric("Max Weight Lifted", f"{max_weight:.1f} kg")
                 col3.metric("Total Sets Logged", total_sets)
                 
-                st.markdown("#### Recent 10 Records")
-                # Sort newest first
-                df_recent = df_chart.sort_values(by=['Date', 'ID'], ascending=[False, False]).head(10).copy()
+                st.markdown("#### Recent 3 Days of Records")
+                # Get unique dates and take the last 3
+                unique_dates = sorted(df_chart['Date'].dt.date.unique(), reverse=True)[:3]
+                df_recent = df_chart[df_chart['Date'].dt.date.isin(unique_dates)].sort_values(by=['Date', 'ID'], ascending=[False, False]).copy()
                 
-                for d in df_recent['Date'].dt.date.unique():
+                for d in unique_dates:
                     st.markdown(f"**📅 {d.strftime('%Y/%m/%d')}**")
                     day_sets = df_recent[df_recent['Date'].dt.date == d]
                     for _, row in day_sets.iterrows():
