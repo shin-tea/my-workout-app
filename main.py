@@ -433,20 +433,14 @@ with tab1:
                 # Sort newest first
                 df_recent = df_chart.sort_values(by=['Date', 'ID'], ascending=[False, False]).head(10).copy()
                 
-                # Clean up display columns
-                cols_to_show = ['Date', 'Weight', 'Unit', 'Reps', 'RPE', 'Set Type', 'Memo']
-                # Filter columns that actually exist
-                cols_to_show = [c for c in cols_to_show if c in df_recent.columns]
-                
-                st.dataframe(
-                    df_recent[cols_to_show],
-                    hide_index=True,
-                    use_container_width=True,
-                    column_config={
-                        "Date": st.column_config.DateColumn("Date", format="YYYY/MM/DD"),
-                        "Weight": st.column_config.NumberColumn("Weight", format="%.1f"),
-                    }
-                )
+                for d in df_recent['Date'].dt.date.unique():
+                    st.markdown(f"**📅 {d.strftime('%Y/%m/%d')}**")
+                    day_sets = df_recent[df_recent['Date'].dt.date == d]
+                    for _, row in day_sets.iterrows():
+                        weight_str = f"{row['Weight']:.1f} {row['Unit']}"
+                        rm_val = row.get('Estimated 1RM (kg)', 0)
+                        rm_str = f" (1RM: {rm_val:.1f} kg)"
+                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;• {weight_str} x {int(row['Reps'])}{rm_str}")
                 
                 st.divider()
                 st.markdown("### Exercise Details & Notes")
