@@ -282,10 +282,9 @@ if submitted:
     row = {
         "ID": int(start_id),
         "Date": date_val.strftime("%Y/%m/%d"),
-        "ExerciseID": ex_id,
+        "ExerciseID": str(ex_id),
         "Target": target_muscle,
         "Exercise": selected_exercise,
-        # "Set #": int(set_num), # REMOVED
         "Weight": float(weight),
         "Unit": unit,
         "Reps": int(reps),
@@ -306,18 +305,15 @@ if submitted:
         
         # Prepare data for append_rows
         # We need the headers from the sheet to ensure order.
-        # If df_log is loaded, we can use its columns.
         if not df_log.empty:
             headers = df_log.columns.tolist()
         else:
             # Fallback to the known structure if sheet is empty
-            # Removed Set # from fallback
             headers = ["ID", "Date", "ExerciseID", "Target", "Exercise", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"]
             
         rows_to_append = []
         for row_dict in new_rows:
-            # If header exists in row_dict, use it. If not, empty string.
-            # This handles case where "Set #" might still be in headers but we don't have it in row_dict
+            # Ensure values are typed correctly and match headers
             row_vals = [row_dict.get(h, "") for h in headers]
             rows_to_append.append(row_vals)
             
@@ -596,8 +592,7 @@ with tab2:
                                 "Weight": st.column_config.NumberColumn("Weight", format="%.1f"),
                                 "Estimated 1RM (kg)": st.column_config.NumberColumn("1RM", format="%.1f"),
                             },
-                            # Removed "Set #" from disabled list
-                            disabled=["Exercise", "Target", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo", "ID", "ExerciseID", "Date", "Estimated 1RM (kg)", "Weight (kg)"],
+                            disabled=["Exercise", "Target", "Weight", "Unit", "Reps", "RPE", "Set Type", "ID", "ExerciseID", "Date", "Estimated 1RM (kg)", "Weight (kg)"],
                             key=f"editor_{d}"
                         )
                         edited_dfs.append(edited)
