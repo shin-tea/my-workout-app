@@ -21,10 +21,29 @@ st.set_page_config(page_title="Workout Tracker", layout="wide", page_icon="💪"
 st.title("Workout Tracker")
 
 
-# --- Success Message Logic ---
-if 'success_msg' in st.session_state and st.session_state['success_msg']:
-    st.success(st.session_state['success_msg'])
-    del st.session_state['success_msg']
+st.markdown(
+    """
+    <style>
+    /* Make the sidebar header sticky */
+    [data-testid="stSidebarNav"] {
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        background-color: white; /* Match sidebar bg */
+        padding-top: 1rem;
+        padding-bottom: 1rem;
+    }
+    /* Adjust sidebar top padding if needed */
+    section[data-testid="stSidebar"] > div {
+        padding-top: 0;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# --- Success Message Logic (Moved to Sidebar) ---
+# Will be rendered in sidebar later
 # -----------------------------
 
 # --- Connection ---
@@ -60,7 +79,7 @@ def init_connection():
 sh = init_connection()
 
 # --- Data Loading ---
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=3600)
 def load_data():
     """Load all necessary sheets from GSheets."""
     if sh is None:
@@ -112,6 +131,12 @@ if df_master.empty or df_constants.empty:
 
 # --- Sidebar: Input Form ---
 st.sidebar.header("Log Workout")
+
+# Display Success Message here in sidebar
+if 'success_msg' in st.session_state and st.session_state['success_msg']:
+    st.sidebar.success(st.session_state['success_msg'])
+    del st.session_state['success_msg']
+
 # 1. Constants Map
 # Structure: Category | Value
 try:
@@ -220,21 +245,6 @@ else:
     # Exercise Selector
     selected_exercise = st.sidebar.selectbox("Exercise", filtered_options)
 
-# --- Logic: Handle Set # Reset on Exercise Change ---
-if 'last_exercise' not in st.session_state:
-    st.session_state['last_exercise'] = None
-if 'set_input_val' not in st.session_state:
-    st.session_state['set_input_val'] = 1
-if 'set_input_key' not in st.session_state:
-    st.session_state['set_input_key'] = 0
-
-# If exercise changed, reset set number to 1
-if st.session_state['last_exercise'] != selected_exercise:
-    st.session_state['set_input_val'] = 1
-    st.session_state['set_input_key'] += 1 # Force widget recreate
-    st.session_state['last_exercise'] = selected_exercise
-# ----------------------------------------------------
-
 with st.sidebar.form("log_form"):
     # Date
     date_val = st.date_input("Date", datetime.date.today(), format="YYYY/MM/DD")
@@ -246,18 +256,8 @@ with st.sidebar.form("log_form"):
     with col_u:
         unit = st.selectbox("Unit", units, index=0 if 'kg' in units else 0, key="unit_select")
     
-    col_r, col_s = st.columns(2)
-    with col_r:
-        reps = st.number_input("Reps", min_value=0, step=1, value=10)
-    with col_s:
-        # Use dynamic key to allow programmatic updates without "widget value" conflict
-        set_num = st.number_input(
-            "Set #", 
-            min_value=1, 
-            step=1, 
-            value=st.session_state['set_input_val'],
-            key=f"set_num_{st.session_state['set_input_key']}"
-        )
+    # Reps (Full width since Set# is gone)
+    reps = st.number_input("Reps", min_value=0, step=1, value=10)
         
     rpe = st.number_input("RPE (1-10)", min_value=1.0, max_value=10.0, step=0.5, value=None)
     set_type = st.selectbox("Set Type", set_types, index=0 if 'Main' in set_types else 0)
@@ -285,7 +285,7 @@ if submitted:
         "ExerciseID": ex_id,
         "Target": target_muscle,
         "Exercise": selected_exercise,
-        "Set #": int(set_num),
+        # "Set #": int(set_num), # REMOVED
         "Weight": float(weight),
         "Unit": unit,
         "Reps": int(reps),
@@ -311,21 +311,23 @@ if submitted:
             headers = df_log.columns.tolist()
         else:
             # Fallback to the known structure if sheet is empty
-            headers = ["ID", "Date", "ExerciseID", "Target", "Exercise", "Set #", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"]
+            # Removed Set # from fallback
+            headers = ["ID", "Date", "ExerciseID", "Target", "Exercise", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"]
             
         rows_to_append = []
         for row_dict in new_rows:
+            # If header exists in row_dict, use it. If not, empty string.
+            # This handles case where "Set #" might still be in headers but we don't have it in row_dict
             row_vals = [row_dict.get(h, "") for h in headers]
             rows_to_append.append(row_vals)
             
         ws_log.append_rows(rows_to_append, value_input_option='USER_ENTERED')
         
         # Store success message in session state for display after rerun
-        st.session_state['success_msg'] = f"Running: Added Set #{set_num} of {selected_exercise}!"
+        st.session_state['success_msg'] = f"Running: Added {selected_exercise} ({weight}{unit} x {reps})!"
         
-        # Increment Set # for next log
-        st.session_state['set_input_val'] = int(set_num) + 1
-        st.session_state['set_input_key'] += 1 # Force widget recreate next run
+        # Increment Set # logic REMOVED
+
         
         st.cache_data.clear()
         st.rerun()
@@ -386,7 +388,11 @@ with tab1:
             if df_chart.empty:
                  st.info("No valid records for this exercise.")
             else:
-                # Remove Daily Aggregation to show ALL sets
+                # Calculate Set # dynamically for visualization
+                # Sort by ID to ensure order
+                df_chart = df_chart.sort_values('ID')
+                df_chart['Set Order'] = df_chart.groupby('Date').cumcount() + 1
+                
                 # Plotly Scatter Chart
                 fig = px.scatter(
                     df_chart, 
@@ -395,7 +401,7 @@ with tab1:
                     size='Reps',
                     color='Estimated 1RM (kg)', # Color by intensity
                     title=f"{selected_chart_exercise} - Performance Analysis",
-                    custom_data=['Set #', 'Reps', 'Weight (kg)', 'RPE', 'Memo', 'Estimated 1RM (kg)']
+                    custom_data=['Set Order', 'Reps', 'Weight (kg)', 'RPE', 'Memo', 'Estimated 1RM (kg)']
                 )
                 fig.update_traces(
                     marker=dict(line=dict(width=1, color='DarkSlateGrey'), sizeref=0.5, sizemin=8),
@@ -562,7 +568,8 @@ with tab2:
                                 "Weight": st.column_config.NumberColumn("Weight", format="%.1f"),
                                 "Estimated 1RM (kg)": st.column_config.NumberColumn("1RM", format="%.1f"),
                             },
-                            disabled=["Exercise", "Target", "Set #", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo", "ID", "ExerciseID", "Date", "Estimated 1RM (kg)", "Weight (kg)"],
+                            # Removed "Set #" from disabled list
+                            disabled=["Exercise", "Target", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo", "ID", "ExerciseID", "Date", "Estimated 1RM (kg)", "Weight (kg)"],
                             key=f"editor_{d}"
                         )
                         edited_dfs.append(edited)
@@ -599,7 +606,7 @@ with tab2:
                                 
                                 headers = df_current.columns.tolist() if not df_current.empty else []
                                 if not headers:
-                                     headers = ["ID", "Date", "ExerciseID", "Target", "Exercise", "Set #", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"]
+                                     headers = ["ID", "Date", "ExerciseID", "Target", "Exercise", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"]
 
                                 update_data = [headers] + df_remaining.values.tolist()
                                 ws_log_current.update(range_name='A1', values=update_data, value_input_option='USER_ENTERED')
@@ -620,19 +627,22 @@ with tab3:
     
     # --- Template Creation (Top of tab) ---
     with st.expander("Create New Template", expanded=df_templates.empty):
-        col_name, col_muscle = st.columns(2)
-        with col_name:
-            new_template_name = st.text_input("Template Name", placeholder="e.g., Chest Day", key="tab_template_name")
-        with col_muscle:
-            create_muscle_filter = st.selectbox("Filter Exercises by Muscle", ["All"] + muscle_groups_input, key="tab_create_template_muscle")
+        with st.form("create_template_form"):
+            col_name, col_muscle = st.columns(2)
+            with col_name:
+                new_template_name = st.text_input("Template Name", placeholder="e.g., Chest Day", key="tab_template_name")
+            with col_muscle:
+                create_muscle_filter = st.selectbox("Filter Exercises by Muscle", ["All"] + muscle_groups_input, key="tab_create_template_muscle")
+                
+            options_to_select = exercise_options
+            if create_muscle_filter != "All":
+                options_to_select = [ex for ex in exercise_options if exercise_map.get(ex, {}).get('target_muscle_group') == create_muscle_filter]
             
-        options_to_select = exercise_options
-        if create_muscle_filter != "All":
-            options_to_select = [ex for ex in exercise_options if exercise_map.get(ex, {}).get('target_muscle_group') == create_muscle_filter]
+            selected_exercises_for_template = st.multiselect("Select Exercises (Order is preserved)", options_to_select, key="tab_template_exercises")
+            
+            submitted_template = st.form_submit_button("Save Template", type="primary")
         
-        selected_exercises_for_template = st.multiselect("Select Exercises (Order is preserved)", options_to_select, key="tab_template_exercises")
-        
-        if st.button("Save Template", type="primary"):
+        if submitted_template:
             if not new_template_name:
                 st.error("Please enter a template name.")
             elif not selected_exercises_for_template:
