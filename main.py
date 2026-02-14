@@ -498,6 +498,20 @@ with tab2:
         df_log_history = df_log.copy()
         if not pd.api.types.is_datetime64_any_dtype(df_log_history['Date']):
              df_log_history['Date'] = pd.to_datetime(df_log_history['Date'], errors='coerce')
+        
+        # Monthly Filter Selection
+        df_log_history['Month'] = df_log_history['Date'].dt.strftime('%Y/%m')
+        available_months = sorted(df_log_history['Month'].dropna().unique().tolist(), reverse=True)
+        
+        current_month_str = datetime.date.today().strftime('%Y/%m')
+        default_month_idx = 0
+        if current_month_str in available_months:
+            default_month_idx = available_months.index(current_month_str)
+            
+        selected_month = st.selectbox("Select Month", available_months, index=default_month_idx)
+        
+        # Filter by selected month
+        df_log_history = df_log_history[df_log_history['Month'] == selected_month]
 
         # Create Date Summary for Selection
         # Group by Date and count sets
