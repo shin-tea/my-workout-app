@@ -429,6 +429,25 @@ with tab1:
                 col2.metric("Max Weight Lifted", f"{max_weight:.1f} kg")
                 col3.metric("Total Sets Logged", total_sets)
                 
+                st.markdown("#### Recent 10 Records")
+                # Sort newest first
+                df_recent = df_chart.sort_values(by=['Date', 'ID'], ascending=[False, False]).head(10).copy()
+                
+                # Clean up display columns
+                cols_to_show = ['Date', 'Weight', 'Unit', 'Reps', 'RPE', 'Set Type', 'Memo']
+                # Filter columns that actually exist
+                cols_to_show = [c for c in cols_to_show if c in df_recent.columns]
+                
+                st.dataframe(
+                    df_recent[cols_to_show],
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "Date": st.column_config.DateColumn("Date", format="YYYY/MM/DD"),
+                        "Weight": st.column_config.NumberColumn("Weight", format="%.1f"),
+                    }
+                )
+                
                 st.divider()
                 st.markdown("### Exercise Details & Notes")
                 
