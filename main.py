@@ -230,13 +230,7 @@ with tab1:
 
     if selected_exercise:
         with st.form("log_form"):
-            col_d, col_t = st.columns(2)
-            with col_d:
-                date_val = st.date_input("Date", datetime.date.today(), format="YYYY/MM/DD")
-            with col_t:
-                set_type_idx = 0
-                if 'Main' in set_types: set_type_idx = set_types.index('Main')
-                set_type = st.selectbox("Set Type", set_types, index=set_type_idx)
+            date_val = st.date_input("Date", datetime.date.today(), format="YYYY/MM/DD")
 
             col_w, col_u = st.columns([2, 1])
             with col_w:
@@ -244,11 +238,15 @@ with tab1:
             with col_u:
                 unit = st.selectbox("Unit", units, index=default_unit_idx, key="unit_select")
                 
-            col_r, col_rpe = st.columns(2)
+            col_r, col_rpe, col_t = st.columns([1, 1, 1.5])
             with col_r:
                 reps = st.number_input("Reps", min_value=0, step=1, value=10)
             with col_rpe:
                 rpe = st.number_input("RPE", min_value=1.0, max_value=10.0, step=0.5, value=None)
+            with col_t:
+                set_type_idx = 0
+                if 'Main' in set_types: set_type_idx = set_types.index('Main')
+                set_type = st.selectbox("Set Type", set_types, index=set_type_idx)
                 
             memo = st.text_input("Memo")
             
