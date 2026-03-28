@@ -126,7 +126,7 @@ tab1, tab2, tab3 = st.tabs(["Log & Analysis", "History & Edit", "Templates"])
 
 # === TAB 1: Log & Analysis ===
 with tab1:
-    st.markdown("### 🏋️ Log Workout")
+    st.markdown("### Log")
     
     if 'success_msg' in st.session_state and st.session_state['success_msg']:
         st.success(st.session_state['success_msg'])
@@ -290,7 +290,7 @@ with tab1:
                 
                 # Fix filter reset bug: update session state to the logged muscle
                 if target_muscle:
-                    st.session_state['dash_muscle_filter'] = target_muscle
+                    st.session_state['log_muscle_filter'] = target_muscle
                     
                 st.cache_data.clear()
                 st.rerun()
@@ -298,7 +298,7 @@ with tab1:
                 st.error(f"Failed to update spreadsheet: {e}")
 
     st.divider()
-    st.markdown("### 📊 Performance Analysis & Metrics")
+    st.markdown("### Analysis")
     
     if not df_log.empty:
         df_log['Date'] = pd.to_datetime(df_log['Date'], errors='coerce')
@@ -311,49 +311,8 @@ with tab1:
         )
         df_log['Estimated 1RM (kg)'] = df_log['Weight (kg)'] * (1 + df_log['Reps'] / 30.0)
         
-        unique_exercises = sorted(df_log['Exercise'].astype(str).unique().tolist())
-        
-        # --- Muscle Group Filter ---
-        if 'target_muscle_group' in df_master.columns:
-            muscle_groups = sorted(df_master['target_muscle_group'].dropna().unique().tolist())
-            col_m_filter, _ = st.columns([1, 2])
-            with col_m_filter:
-                filter_options = ["All"] + muscle_groups
-                if 'dash_muscle_filter' not in st.session_state:
-                    st.session_state['dash_muscle_filter'] = "All"
-                
-                try:
-                    default_filter_idx = filter_options.index(st.session_state['dash_muscle_filter'])
-                except ValueError:
-                    default_filter_idx = 0
-                
-                selected_muscle = st.selectbox(
-                    "Dashboard Filter: Muscle Group", 
-                    filter_options, 
-                    index=default_filter_idx,
-                    key="dash_muscle_filter_widget"
-                )
-                
-                if st.session_state['dash_muscle_filter'] != selected_muscle:
-                    st.session_state['dash_muscle_filter'] = selected_muscle
-            
-            if selected_muscle != "All":
-                filtered_exercises = [ex for ex in unique_exercises if exercise_map.get(ex, {}).get('target_muscle_group') == selected_muscle]
-                unique_exercises = filtered_exercises
-
-        # Default chart selection prioritizing last logged in the filtered scope
-        default_idx = 0
-        if not df_log.empty:
-            for idx in reversed(df_log.index):
-                last_ex_candidate = df_log.loc[idx, 'Exercise']
-                if last_ex_candidate in unique_exercises:
-                    default_idx = unique_exercises.index(last_ex_candidate)
-                    break
-                
-        selected_chart_exercise = st.selectbox("Select Exercise to Visualize", unique_exercises, index=default_idx, key="chart_ex_select")
-        
-        if selected_chart_exercise:
-            df_chart = df_log[df_log['Exercise'] == selected_chart_exercise].copy()
+        if selected_exercise:
+            df_chart = df_log[df_log['Exercise'] == selected_exercise].copy()
             df_chart = df_chart.dropna(subset=['Date'])
             
             if df_chart.empty:
@@ -368,7 +327,7 @@ with tab1:
                     y='Weight (kg)',
                     size='Reps',
                     color='Estimated 1RM (kg)',
-                    title=f"{selected_chart_exercise} - Performance Analysis",
+                    title=f"{selected_exercise} - Performance Analysis",
                     custom_data=['Set Order', 'Reps', 'Weight (kg)', 'RPE', 'Memo', 'Estimated 1RM (kg)']
                 )
                 fig.update_traces(
@@ -396,7 +355,7 @@ with tab1:
                 col2.metric("Max Weight Lifted", f"{max_weight:.1f} kg")
                 col3.metric("Total Sets Logged", total_sets)
                 
-                st.markdown("#### Recent 3 Days of Records")
+                st.markdown("#### Recent Sets")
                 unique_dates = sorted(df_chart['Date'].dt.date.unique(), reverse=True)[:3]
                 df_recent = df_chart[df_chart['Date'].dt.date.isin(unique_dates)].copy()
                 
@@ -414,20 +373,20 @@ with tab1:
                         set_num += 1
                 
                 st.divider()
-                st.markdown("### Exercise Details & Notes")
-                ex_info = exercise_map.get(selected_chart_exercise, {})
+                st.markdown("### Notes")
+                ex_info = exercise_map.get(selected_exercise, {})
                 c1, c2, c3 = st.columns(3)
                 c1.markdown(f"**Sub Muscle:** {ex_info.get('sub_muscle_group', '-')}")
                 c2.markdown(f"**Equipment:** {ex_info.get('equipment_type', '-')}")
                 c3.markdown(f"**Category:** {ex_info.get('exercise_category', '-')}")
                 
-                mask = df_master['exercise_name'] == selected_chart_exercise
+                mask = df_master['exercise_name'] == selected_exercise
                 if mask.any():
                     original_idx = df_master.index[mask][0]
                     current_desc = df_master.loc[original_idx, 'description']
                     if pd.isna(current_desc): current_desc = ""
                     
-                    new_desc = st.text_area("Description / Notes", value=str(current_desc), height=100, key=f"analysis_desc_edit_{selected_chart_exercise}")
+                    new_desc = st.text_area("Description / Notes", value=str(current_desc), height=100, key=f"analysis_desc_edit_{selected_exercise}")
                     
                     if st.button("Save Description", key="save_desc_analysis"):
                         try:
@@ -452,7 +411,7 @@ with tab1:
 
 # === TAB 2: History & Edit ===
 with tab2:
-    st.markdown("### 🗓️ Workout History & Management")
+    st.markdown("### History")
     if not df_log.empty:
         df_log_history = df_log.copy()
         if not pd.api.types.is_datetime64_any_dtype(df_log_history['Date']):
@@ -476,7 +435,7 @@ with tab2:
         col_list, col_details = st.columns([1, 2])
         
         with col_list:
-            st.markdown("#### Select Date(s)")
+            st.markdown("#### Dates")
             st.caption("Max 3 dates.")
             event = st.dataframe(
                 df_date_summary,
@@ -606,7 +565,7 @@ with tab2:
 
 # === TAB 3: Templates ===
 with tab3:
-    st.markdown("### Templates Management")
+    st.markdown("### Templates")
     
     with st.expander("Create New Template", expanded=df_templates.empty):
         with st.form("create_template_form"):
@@ -662,7 +621,7 @@ with tab3:
                     st.error(f"Failed to save template: {e}")
 
     st.divider()
-    st.markdown("### Saved Templates")
+    st.markdown("### Saved")
     if not df_templates.empty:
         df_temp_display = df_templates.copy()
         
