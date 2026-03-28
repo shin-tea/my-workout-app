@@ -95,7 +95,7 @@ except KeyError:
     st.stop()
 
 if 'exercise_name' in df_master.columns:
-    exercise_options = df_master['exercise_name'].dropna().unique().tolist()
+    exercise_options = sorted(df_master['exercise_name'].dropna().unique().tolist(), key=lambda x: str(x).lower())
     exercise_map = df_master.set_index('exercise_name').to_dict('index')
 else:
     st.error("Exercise Master sheet missing 'exercise_name' column.")
