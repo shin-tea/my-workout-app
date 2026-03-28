@@ -207,7 +207,7 @@ with tab1:
     st.markdown(
         """
         <style>
-        /* Force form columns to stay side-by-side on mobile */
+        /* Force form columns to stay side-by-side on mobile and prevent horizontal overflow */
         @media (max-width: 600px) {
             div[data-testid="stForm"] div[data-testid="stHorizontalBlock"] {
                 flex-direction: row !important;
@@ -217,6 +217,10 @@ with tab1:
             div[data-testid="stForm"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
                 width: auto !important;
                 flex: 1 1 0% !important;
+                min-width: 0 !important;
+            }
+            div[data-testid="stForm"] div[data-testid="stHorizontalBlock"] * {
+                min-width: 0 !important;
             }
         }
         </style>
@@ -226,6 +230,14 @@ with tab1:
 
     if selected_exercise:
         with st.form("log_form"):
+            col_d, col_t = st.columns(2)
+            with col_d:
+                date_val = st.date_input("Date", datetime.date.today(), format="YYYY/MM/DD")
+            with col_t:
+                set_type_idx = 0
+                if 'Main' in set_types: set_type_idx = set_types.index('Main')
+                set_type = st.selectbox("Set Type", set_types, index=set_type_idx)
+
             col_w, col_u = st.columns([2, 1])
             with col_w:
                 weight = st.number_input("Weight", min_value=0.0, step=2.5, format="%.1f", value=default_weight)
@@ -237,14 +249,6 @@ with tab1:
                 reps = st.number_input("Reps", min_value=0, step=1, value=10)
             with col_rpe:
                 rpe = st.number_input("RPE", min_value=1.0, max_value=10.0, step=0.5, value=None)
-                
-            col_d, col_t = st.columns(2)
-            with col_d:
-                date_val = st.date_input("Date", datetime.date.today(), format="YYYY/MM/DD")
-            with col_t:
-                set_type_idx = 0
-                if 'Main' in set_types: set_type_idx = set_types.index('Main')
-                set_type = st.selectbox("Set Type", set_types, index=set_type_idx)
                 
             memo = st.text_input("Memo")
             
