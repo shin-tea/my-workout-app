@@ -20,55 +20,17 @@ SCOPES = [
 st.set_page_config(page_title="Workout Tracker", layout="wide", page_icon="💪")
 st.title("Workout Tracker")
 
-
-st.markdown(
-    """
-    <style>
-    /* Make the sidebar header sticky */
-    [data-testid="stSidebarNav"] {
-        position: sticky;
-        top: 0;
-        z-index: 100;
-        background-color: white; /* Match sidebar bg */
-        padding-top: 1rem;
-        padding-bottom: 1rem;
-    }
-    /* Adjust sidebar top padding if needed */
-    section[data-testid="stSidebar"] > div {
-        padding-top: 0;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-# --- Success Message Logic (Moved to Sidebar) ---
-# Will be rendered in sidebar later
-# -----------------------------
-
 # --- Connection ---
 @st.cache_resource
 def init_connection():
     """Establish connection to Google Sheets using gspread."""
     try:
-        # Load secrets from strict toml structure
-        # We need to construct the credentials dict from st.secrets.connections.gsheets
-        # or however we stored it.
-        # We stored it under [connections.gsheets]
-        
-        # Access the secrets. ensure we convert Streamlit's AttrDict to a standard dict if needed
-        # but Credentials.from_service_account_info expects a dict.
-        
         secrets_dict = dict(st.secrets["connections"]["gsheets"])
-        
-        # Remove connection-specific keys that aren't part of the service account JSON
-        # 'spreadsheet' is not part of the creds
         creds_dict = {k: v for k, v in secrets_dict.items() if k != "spreadsheet"}
         
         creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
         client = gspread.authorize(creds)
         
-        # Open the spreadsheet
         spreadsheet_url = secrets_dict.get("spreadsheet")
         sh = client.open_by_url(spreadsheet_url)
         return sh
@@ -86,32 +48,26 @@ def load_data():
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         
     try:
-        # Load Training Log
         ws_log = sh.worksheet(SHEET_TRAINING_LOG)
         data_log = ws_log.get_all_records()
         df_log = pd.DataFrame(data_log)
         
-        # Ensure ID column exists, treating as numeric
         if 'ID' in df_log.columns:
             df_log['ID'] = pd.to_numeric(df_log['ID'], errors='coerce').fillna(0).astype(int)
         
-        # Load Exercise Master
         ws_master = sh.worksheet(SHEET_EXERCISE_MASTER)
         data_master = ws_master.get_all_records()
         df_master = pd.DataFrame(data_master)
         
-        # Load Constants
         ws_constants = sh.worksheet(SHEET_CONSTANTS)
         data_constants = ws_constants.get_all_records()
         df_constants = pd.DataFrame(data_constants)
         
-        # Load Template Master (create if not exists)
         try:
             ws_templates = sh.worksheet(SHEET_TEMPLATE_MASTER)
             data_templates = ws_templates.get_all_records()
             df_templates = pd.DataFrame(data_templates)
         except gspread.exceptions.WorksheetNotFound:
-            # Create the sheet with headers
             ws_templates = sh.add_worksheet(title=SHEET_TEMPLATE_MASTER, rows=100, cols=10)
             headers = ["template_id", "template_name", "exercise_ids", "created_at"]
             ws_templates.append_row(headers, value_input_option='USER_ENTERED')
@@ -129,16 +85,7 @@ if df_master.empty or df_constants.empty:
         st.warning("Could not load Master or Constants data. Please check the spreadsheet.")
     st.stop()
 
-# --- Sidebar: Input Form ---
-st.sidebar.header("Log Workout")
-
-# Display Success Message here in sidebar
-if 'success_msg' in st.session_state and st.session_state['success_msg']:
-    st.sidebar.success(st.session_state['success_msg'])
-    del st.session_state['success_msg']
-
-# 1. Constants Map
-# Structure: Category | Value
+# --- Pre-processing Mappings ---
 try:
     set_types_raw = df_constants[df_constants['Category'] == 'SetType']['Value'].dropna().unique().tolist()
     set_types = [""] + set_types_raw
@@ -147,11 +94,8 @@ except KeyError:
     st.error("Constants sheet missing required 'Category' or 'Value' columns.")
     st.stop()
 
-# 2. Exercise Map
-# Structure: exercise_id | target_muscle_group | exercise_name ...
 if 'exercise_name' in df_master.columns:
     exercise_options = df_master['exercise_name'].dropna().unique().tolist()
-    # Create valid map: Name -> {id, target, ...}
     exercise_map = df_master.set_index('exercise_name').to_dict('index')
 else:
     st.error("Exercise Master sheet missing 'exercise_name' column.")
@@ -169,187 +113,179 @@ if not df_templates.empty and 'template_name' in df_templates.columns:
             template_map[tname] = raw_ids.split(delim) if raw_ids else []
 
 def normalize_id(val):
-    """Normalize IDs to string and strip trailing .0 if present (for numeric IDs)."""
     if pd.isna(val): return ""
     s = str(val).strip()
     if s.endswith('.0'):
         return s[:-2]
     return s
 
-selected_template_option = st.sidebar.selectbox("Use Template", template_options, key="template_selector")
-
-# Session state for template workflow
-if 'last_template' not in st.session_state:
-    st.session_state['last_template'] = selected_template_option
-if 'template_current_idx' not in st.session_state:
-    st.session_state['template_current_idx'] = 0
-
-# Reset index if template selection changes
-if st.session_state['last_template'] != selected_template_option:
-    st.session_state['template_current_idx'] = 0
-    st.session_state['last_template'] = selected_template_option
-
-# Parse template selection
-using_template = selected_template_option != "Select from Exercises"
-if using_template:
-    template_name = selected_template_option
-    exercise_ids_in_template = template_map.get(template_name, [])
-else:
-    exercise_ids_in_template = []
-
-# --- Interactive Selection (Outside Form) ---
 muscle_groups_input = sorted(df_master['target_muscle_group'].dropna().unique().tolist()) if 'target_muscle_group' in df_master.columns else []
 
-# Define normal selection defaults for fallback
-selected_muscle_input = "All"
-filtered_options = exercise_options
+# --- Main App ---
+tab1, tab2, tab3 = st.tabs(["Log & Analysis", "History & Edit", "Templates"])
 
-if using_template and exercise_ids_in_template:
-    # Show exercises from template
-    template_exercise_names = []
-    for eid in exercise_ids_in_template:
-        eid_str = normalize_id(eid)
-        for ex_name, ex_info in exercise_map.items():
-            if normalize_id(ex_info.get('exercise_id', '')) == eid_str:
-                template_exercise_names.append(ex_name)
-                break
-    
-    if template_exercise_names:
-        st.sidebar.markdown(f"**Exercises in Template:** {len(template_exercise_names)}")
-        current_idx = st.session_state.get('template_current_idx', 0)
-        if current_idx >= len(template_exercise_names):
-            current_idx = 0
-            st.session_state['template_current_idx'] = 0
-        
-        selected_exercise = st.sidebar.selectbox(
-            "Exercise (Template Order)", 
-            template_exercise_names, 
-            index=current_idx,
-            key="template_ex_select"
-        )
-        # Sync index
-        if selected_exercise in template_exercise_names:
-            st.session_state['template_current_idx'] = template_exercise_names.index(selected_exercise)
-    else:
-        st.sidebar.warning("No exercises found in template")
-        selected_exercise = None
-else:
-    # Normal exercise selection
-    # Muscle Filter
-    selected_muscle_input = st.sidebar.selectbox("Filter Muscle", ["All"] + muscle_groups_input)
-    
-    # Filter Options
-    if selected_muscle_input != "All":
-        filtered_options = [ex for ex in exercise_options if exercise_map.get(ex, {}).get('target_muscle_group') == selected_muscle_input]
-    
-    # Exercise Selector
-    selected_exercise = st.sidebar.selectbox("Exercise", filtered_options)
-
-with st.sidebar.form("log_form"):
-    # Date
-    date_val = st.date_input("Date", datetime.date.today(), format="YYYY/MM/DD")
-    
-    # Stats
-    col_w, col_u = st.columns([3, 2])
-    with col_w:
-        weight = st.number_input("Weight", min_value=0.0, step=2.5, format="%.1f")
-    with col_u:
-        unit = st.selectbox("Unit", units, index=0 if 'kg' in units else 0, key="unit_select")
-    
-    # Reps (Full width since Set# is gone)
-    reps = st.number_input("Reps", min_value=0, step=1, value=10)
-        
-    rpe = st.number_input("RPE (1-10)", min_value=1.0, max_value=10.0, step=0.5, value=None)
-    set_type = st.selectbox("Set Type", set_types, index=0 if 'Main' in set_types else 0)
-    memo = st.text_area("Memo", height=2)
-    
-    submitted = st.form_submit_button("Add Log", type="primary")
-
-if submitted:
-    # 1. Get Metadata
-    ex_info = exercise_map.get(selected_exercise, {})
-    ex_id = ex_info.get('exercise_id', '')
-    target_muscle = ex_info.get('target_muscle_group', '')
-
-    # 3. Generate IDs
-    if df_log.empty:
-        start_id = 1
-    else:
-        start_id = df_log['ID'].max() + 1
-    
-    # 4. Create Rows
-    # Single record per click
-    row = {
-        "ID": int(start_id),
-        "Date": date_val.strftime("%Y/%m/%d"),
-        "ExerciseID": str(ex_id),
-        "Target": target_muscle,
-        "Exercise": selected_exercise,
-        "Weight": float(weight),
-        "Unit": unit,
-        "Reps": int(reps),
-        "RPE": float(rpe) if rpe is not None else "",
-        "Set Type": set_type,
-        "Memo": memo
-    }
-    new_rows = [row]
-    
-    # 5. Append to GSheet
-    try:
-        ws_log = sh.worksheet(SHEET_TRAINING_LOG)
-        
-        # Convert dictionary rows to list of lists, matching header order
-        # Need to read header first to be safe, or assume fixed order defined in prompt?
-        # Safe way: match df_log columns if it exists, else assume fixed.
-        # But df_log was read from get_all_records(), so keys match headers.
-        
-        # Prepare data for append_rows
-        # We need the headers from the sheet to ensure order.
-        if not df_log.empty:
-            headers = df_log.columns.tolist()
-        else:
-            # Fallback to the known structure if sheet is empty
-            headers = ["ID", "Date", "ExerciseID", "Target", "Exercise", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"]
-            
-        rows_to_append = []
-        for row_dict in new_rows:
-            # Ensure values are typed correctly and match headers
-            row_vals = [row_dict.get(h, "") for h in headers]
-            rows_to_append.append(row_vals)
-            
-        ws_log.append_rows(rows_to_append, value_input_option='USER_ENTERED')
-        
-        # Store success message in session state for display after rerun
-        st.session_state['success_msg'] = f"Running: Added {selected_exercise} ({weight}{unit} x {reps})!"
-        
-        # Increment Set # logic REMOVED
-
-        
-        st.cache_data.clear()
-        st.rerun()
-    except Exception as e:
-        st.error(f"Failed to update spreadsheet: {e}")
-
-# --- Dashboard View ---
-tab1, tab2, tab3 = st.tabs(["Analysis", "History & Edit", "Templates"])
-
-# === TAB 1: Analysis ===
+# === TAB 1: Log & Analysis ===
 with tab1:
-    st.markdown("### Performance Analysis & Metrics")
+    st.markdown("### 🏋️ Log Workout")
+    
+    if 'success_msg' in st.session_state and st.session_state['success_msg']:
+        st.success(st.session_state['success_msg'])
+        del st.session_state['success_msg']
+
+    if 'last_template' not in st.session_state:
+        st.session_state['last_template'] = template_options[0]
+    if 'template_current_idx' not in st.session_state:
+        st.session_state['template_current_idx'] = 0
+
+    col_t, col_1, col_2 = st.columns(3)
+    with col_t:
+        selected_template_option = st.selectbox("Use Template", template_options, key="template_selector")
+
+    if st.session_state['last_template'] != selected_template_option:
+        st.session_state['template_current_idx'] = 0
+        st.session_state['last_template'] = selected_template_option
+
+    using_template = selected_template_option != "Select from Exercises"
+    exercise_ids_in_template = template_map.get(selected_template_option, []) if using_template else []
+    
+    selected_exercise = None
+
+    if using_template and exercise_ids_in_template:
+        template_exercise_names = []
+        for eid in exercise_ids_in_template:
+            eid_str = normalize_id(eid)
+            for ex_name, ex_info in exercise_map.items():
+                if normalize_id(ex_info.get('exercise_id', '')) == eid_str:
+                    template_exercise_names.append(ex_name)
+                    break
+        
+        with col_1:
+            if template_exercise_names:
+                st.markdown(f"**Exercises in Template:** {len(template_exercise_names)}")
+            else:
+                st.warning("No exercises found in template")
+        
+        with col_2:
+            if template_exercise_names:
+                current_idx = st.session_state.get('template_current_idx', 0)
+                if current_idx >= len(template_exercise_names):
+                    current_idx = 0
+                
+                selected_exercise = st.selectbox(
+                    "Exercise (Template Order)", 
+                    template_exercise_names, 
+                    index=current_idx,
+                    key="log_ex_select_template"
+                )
+                if selected_exercise in template_exercise_names:
+                    st.session_state['template_current_idx'] = template_exercise_names.index(selected_exercise)
+    else:
+        with col_1:
+            selected_muscle_input = st.selectbox("Filter Muscle", ["All"] + muscle_groups_input, key="log_muscle_filter")
+        with col_2:
+            filtered_options = exercise_options
+            if selected_muscle_input != "All":
+                filtered_options = [ex for ex in exercise_options if exercise_map.get(ex, {}).get('target_muscle_group') == selected_muscle_input]
+            selected_exercise = st.selectbox("Exercise", filtered_options, key="log_ex_select_normal")
+
+    # Dynamic defaults for Weight and Unit based on past records
+    default_weight = 0.0
+    default_unit_idx = 0 if 'kg' in units else 0
+    if not df_log.empty and selected_exercise:
+        df_ex = df_log[df_log['Exercise'] == selected_exercise]
+        if not df_ex.empty:
+            last_rec = df_ex.iloc[-1]
+            try:
+                default_weight = float(last_rec.get('Weight', 0.0))
+            except ValueError:
+                pass
+            
+            last_unit = str(last_rec.get('Unit', ''))
+            if last_unit in units:
+                default_unit_idx = units.index(last_unit)
+
+    with st.form("log_form"):
+        c1, c2, c3, c4 = st.columns([2, 5, 2, 3])
+        with c1:
+            date_val = st.date_input("Date", datetime.date.today(), format="YYYY/MM/DD")
+        with c2:
+            weight = st.number_input("Weight", min_value=0.0, step=2.5, format="%.1f", value=default_weight)
+        with c3:
+            unit = st.selectbox("Unit", units, index=default_unit_idx, key="unit_select")
+        with c4:
+            reps = st.number_input("Reps", min_value=0, step=1, value=10)
+            
+        c5, c6, c7 = st.columns([4, 4, 4])
+        with c5:
+            rpe = st.number_input("RPE (1-10)", min_value=1.0, max_value=10.0, step=0.5, value=None)
+        with c6:
+            set_type_idx = 0
+            if 'Main' in set_types: set_type_idx = set_types.index('Main')
+            set_type = st.selectbox("Set Type", set_types, index=set_type_idx)
+        with c7:
+            memo = st.text_input("Memo")
+        
+        submitted = st.form_submit_button("Add Log", type="primary")
+
+    if submitted:
+        if not selected_exercise:
+            st.error("Please select an exercise first.")
+        else:
+            ex_info = exercise_map.get(selected_exercise, {})
+            ex_id = ex_info.get('exercise_id', '')
+            target_muscle = ex_info.get('target_muscle_group', '')
+
+            if df_log.empty:
+                start_id = 1
+            else:
+                start_id = df_log['ID'].max() + 1
+            
+            row = {
+                "ID": int(start_id),
+                "Date": date_val.strftime("%Y/%m/%d"),
+                "ExerciseID": str(ex_id),
+                "Target": target_muscle,
+                "Exercise": selected_exercise,
+                "Weight": float(weight),
+                "Unit": unit,
+                "Reps": int(reps),
+                "RPE": float(rpe) if rpe is not None else "",
+                "Set Type": set_type,
+                "Memo": memo
+            }
+            
+            try:
+                ws_log = sh.worksheet(SHEET_TRAINING_LOG)
+                headers = df_log.columns.tolist() if not df_log.empty else ["ID", "Date", "ExerciseID", "Target", "Exercise", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"]
+                rows_to_append = [[row.get(h, "") for h in headers]]
+                
+                ws_log.append_rows(rows_to_append, value_input_option='USER_ENTERED')
+                
+                st.session_state['success_msg'] = f"Added: {selected_exercise} ({weight}{unit} x {reps})"
+                
+                # Fix filter reset bug: update session state to the logged muscle
+                if target_muscle:
+                    st.session_state['dash_muscle_filter'] = target_muscle
+                    
+                st.cache_data.clear()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to update spreadsheet: {e}")
+
+    st.divider()
+    st.markdown("### 📊 Performance Analysis & Metrics")
+    
     if not df_log.empty:
-        # Correct Types for display/plotting
         df_log['Date'] = pd.to_datetime(df_log['Date'], errors='coerce')
         df_log['Weight'] = pd.to_numeric(df_log['Weight'], errors='coerce').fillna(0)
         df_log['Reps'] = pd.to_numeric(df_log['Reps'], errors='coerce').fillna(0)
 
-        # Calculate Derived Columns
         df_log['Weight (kg)'] = df_log.apply(
             lambda x: x['Weight'] * 0.453592 if str(x.get('Unit', '')).lower() == 'lbs' else x['Weight'], 
             axis=1
         )
         df_log['Estimated 1RM (kg)'] = df_log['Weight (kg)'] * (1 + df_log['Reps'] / 30.0)
         
-        # Filter by Exercise
         unique_exercises = sorted(df_log['Exercise'].astype(str).unique().tolist())
         
         # --- Muscle Group Filter ---
@@ -357,23 +293,37 @@ with tab1:
             muscle_groups = sorted(df_master['target_muscle_group'].dropna().unique().tolist())
             col_m_filter, _ = st.columns([1, 2])
             with col_m_filter:
-                selected_muscle = st.selectbox("Dashboard Filter: Muscle Group", ["All"] + muscle_groups, key="dash_muscle_filter")
+                filter_options = ["All"] + muscle_groups
+                if 'dash_muscle_filter' not in st.session_state:
+                    st.session_state['dash_muscle_filter'] = "All"
+                
+                try:
+                    default_filter_idx = filter_options.index(st.session_state['dash_muscle_filter'])
+                except ValueError:
+                    default_filter_idx = 0
+                
+                selected_muscle = st.selectbox(
+                    "Dashboard Filter: Muscle Group", 
+                    filter_options, 
+                    index=default_filter_idx,
+                    key="dash_muscle_filter_widget"
+                )
+                
+                if st.session_state['dash_muscle_filter'] != selected_muscle:
+                    st.session_state['dash_muscle_filter'] = selected_muscle
             
             if selected_muscle != "All":
-                filtered_exercises = []
-                for ex in unique_exercises:
-                    info = exercise_map.get(ex)
-                    if info and info.get('target_muscle_group') == selected_muscle:
-                        filtered_exercises.append(ex)
+                filtered_exercises = [ex for ex in unique_exercises if exercise_map.get(ex, {}).get('target_muscle_group') == selected_muscle]
                 unique_exercises = filtered_exercises
-        # ---------------------------
 
-        # Default selection
+        # Default chart selection prioritizing last logged in the filtered scope
         default_idx = 0
         if not df_log.empty:
-            last_ex = df_log.iloc[-1]['Exercise']
-            if last_ex in unique_exercises:
-                default_idx = unique_exercises.index(last_ex)
+            for idx in reversed(df_log.index):
+                last_ex_candidate = df_log.loc[idx, 'Exercise']
+                if last_ex_candidate in unique_exercises:
+                    default_idx = unique_exercises.index(last_ex_candidate)
+                    break
                 
         selected_chart_exercise = st.selectbox("Select Exercise to Visualize", unique_exercises, index=default_idx, key="chart_ex_select")
         
@@ -384,18 +334,15 @@ with tab1:
             if df_chart.empty:
                  st.info("No valid records for this exercise.")
             else:
-                # Calculate Set # dynamically for visualization
-                # Sort by ID to ensure order
                 df_chart = df_chart.sort_values('ID')
                 df_chart['Set Order'] = df_chart.groupby('Date').cumcount() + 1
                 
-                # Plotly Scatter Chart
                 fig = px.scatter(
                     df_chart, 
                     x='Date', 
                     y='Weight (kg)',
                     size='Reps',
-                    color='Estimated 1RM (kg)', # Color by intensity
+                    color='Estimated 1RM (kg)',
                     title=f"{selected_chart_exercise} - Performance Analysis",
                     custom_data=['Set Order', 'Reps', 'Weight (kg)', 'RPE', 'Memo', 'Estimated 1RM (kg)']
                 )
@@ -415,7 +362,6 @@ with tab1:
                 fig.update_layout(hovermode="closest", showlegend=False, coloraxis_showscale=False)
                 st.plotly_chart(fig, width='stretch')
                 
-                # Metrics
                 col1, col2, col3 = st.columns(3)
                 max_1rm = df_chart['Estimated 1RM (kg)'].max()
                 max_weight = df_chart['Weight (kg)'].max()
@@ -426,32 +372,30 @@ with tab1:
                 col3.metric("Total Sets Logged", total_sets)
                 
                 st.markdown("#### Recent 3 Days of Records")
-                # Get unique dates and take the last 3
                 unique_dates = sorted(df_chart['Date'].dt.date.unique(), reverse=True)[:3]
-                df_recent = df_chart[df_chart['Date'].dt.date.isin(unique_dates)].sort_values(by=['Date', 'ID'], ascending=[False, False]).copy()
+                df_recent = df_chart[df_chart['Date'].dt.date.isin(unique_dates)].copy()
                 
                 for d in unique_dates:
                     st.markdown(f"**📅 {d.strftime('%Y/%m/%d')}**")
                     day_sets = df_recent[df_recent['Date'].dt.date == d]
+                    day_sets = day_sets.sort_values(by='ID', ascending=True)
+                    
+                    set_num = 1
                     for _, row in day_sets.iterrows():
                         weight_str = f"{row['Weight']:.1f} {row['Unit']}"
                         rm_val = row.get('Estimated 1RM (kg)', 0)
-                        rm_str = f" (1RM: {rm_val:.1f} kg)"
-                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;• {weight_str} x {int(row['Reps'])}{rm_str}")
+                        rm_str = f" (1RM: {rm_val:.1f} kg)" if rm_val > 0 else ""
+                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;**{set_num}.** {weight_str} x {int(row['Reps'])}{rm_str}")
+                        set_num += 1
                 
                 st.divider()
                 st.markdown("### Exercise Details & Notes")
-                
-                # Retrieve details from Master
                 ex_info = exercise_map.get(selected_chart_exercise, {})
-                
-                # Display Read-only fields
                 c1, c2, c3 = st.columns(3)
                 c1.markdown(f"**Sub Muscle:** {ex_info.get('sub_muscle_group', '-')}")
                 c2.markdown(f"**Equipment:** {ex_info.get('equipment_type', '-')}")
                 c3.markdown(f"**Category:** {ex_info.get('exercise_category', '-')}")
                 
-                # Editable Description
                 mask = df_master['exercise_name'] == selected_chart_exercise
                 if mask.any():
                     original_idx = df_master.index[mask][0]
@@ -483,14 +427,12 @@ with tab1:
 
 # === TAB 2: History & Edit ===
 with tab2:
-    st.markdown("### Workout History & Management")
+    st.markdown("### 🗓️ Workout History & Management")
     if not df_log.empty:
-        # Pre-process Date
         df_log_history = df_log.copy()
         if not pd.api.types.is_datetime64_any_dtype(df_log_history['Date']):
              df_log_history['Date'] = pd.to_datetime(df_log_history['Date'], errors='coerce')
         
-        # Monthly Filter Selection
         df_log_history['Month'] = df_log_history['Date'].dt.strftime('%Y/%m')
         available_months = sorted(df_log_history['Month'].dropna().unique().tolist(), reverse=True)
         
@@ -501,11 +443,7 @@ with tab2:
             
         selected_month = st.selectbox("Select Month", available_months, index=default_month_idx)
         
-        # Filter by selected month
         df_log_history = df_log_history[df_log_history['Month'] == selected_month]
-
-        # Create Date Summary for Selection
-        # Group by Date and count sets
         df_date_summary = df_log_history.groupby(df_log_history['Date'].dt.date).size().reset_index(name='Sets')
         df_date_summary.columns = ['Date', 'Sets']
         df_date_summary = df_date_summary.sort_values('Date', ascending=False)
@@ -515,8 +453,6 @@ with tab2:
         with col_list:
             st.markdown("#### Select Date(s)")
             st.caption("Max 3 dates.")
-            
-            # Configure dataframe selection
             event = st.dataframe(
                 df_date_summary,
                 on_select="rerun",
@@ -531,116 +467,115 @@ with tab2:
             selected_rows = event.selection.rows
             selected_dates = []
             if selected_rows:
-                # Limit to 3
                 if len(selected_rows) > 3:
                      st.warning("Max 3 dates allowed. Showing top 3 selected.")
                      selected_rows = selected_rows[:3]
-                
                 for idx in selected_rows:
                     selected_dates.append(df_date_summary.iloc[idx]['Date'])
-                
-                selected_dates.sort(reverse=True) # Show newest first or oldest? Oldest to newest seems better for flow.
-                # Actually user asked for Old->New in table. Let's keep dates sorted in list.
                 selected_dates.sort() 
 
-        # Filter Logic & Display
         with col_details:
-            if not selected_dates:
-                 pass  # Show nothing until dates are selected
-            else:
-                # Filter for ALL selected dates
+            if selected_dates:
                 df_display = df_log_history[df_log_history['Date'].dt.date.isin(selected_dates)]
-                
                 if df_display.empty:
                     st.info("No logs found for selected dates.")
                 else:
-                    # Sort: Oldest to Newest as requested
                     df_display = df_display.sort_values(by=['Date', 'ID'], ascending=[True, True])
-                    
-                    # We will collect all edited dataframes to process deletions at once
                     edited_dfs = []
                     
-                    # Insert Delete column globally first to ensure it's there
                     if "Delete" not in df_display.columns:
                         df_display.insert(0, "Delete", False)
                         
                     unique_display_dates = sorted(df_display['Date'].dt.date.unique())
-                    
-                    st.caption("Check 'Delete' box in any table and click the button at the bottom to remove records.")
+                    st.caption("Edit directly in the table, check 'Delete' box to remove records, and click the button below to save.")
                     
                     for d in unique_display_dates:
                         st.markdown(f"#### 📅 {d.strftime('%Y/%m/%d')}")
-                        
-                        # Subset for this date
                         df_date = df_display[df_display['Date'].dt.date == d]
                         
-                        # Show Data Editor
-                        # Hide ID, ExerciseID, Date (since it's the header)
                         edited = st.data_editor(
                             df_date,
                             hide_index=True,
                             column_config={
-                                "Delete": st.column_config.CheckboxColumn(
-                                    "❌",
-                                    width="small",
-                                    default=False,
-                                ),
-                                "ID": None, # Hide
-                                "ExerciseID": None, # Hide
-                                "Date": None, # Hide
+                                "Delete": st.column_config.CheckboxColumn("❌", width="small", default=False),
+                                "ID": None,
+                                "ExerciseID": None,
+                                "Date": None,
                                 "Exercise": st.column_config.TextColumn("Exercise", disabled=True),
+                                "Target": st.column_config.TextColumn("Target", disabled=True),
                                 "Weight": st.column_config.NumberColumn("Weight", format="%.1f"),
-                                "Estimated 1RM (kg)": st.column_config.NumberColumn("1RM", format="%.1f"),
+                                "Unit": st.column_config.SelectboxColumn("Unit", options=units),
+                                "Reps": st.column_config.NumberColumn("Reps", step=1),
+                                "RPE": st.column_config.NumberColumn("RPE", min_value=1.0, max_value=10.0, step=0.5),
+                                "Set Type": st.column_config.SelectboxColumn("Set Type", options=set_types),
+                                "Memo": st.column_config.TextColumn("Memo"),
+                                "Estimated 1RM (kg)": st.column_config.NumberColumn("1RM", format="%.1f", disabled=True),
+                                "Weight (kg)": None,
                             },
-                            disabled=["Exercise", "Target", "Weight", "Unit", "Reps", "RPE", "Set Type", "ID", "ExerciseID", "Date", "Estimated 1RM (kg)", "Weight (kg)"],
+                            disabled=["Exercise", "Target", "ID", "ExerciseID", "Date", "Estimated 1RM (kg)", "Weight (kg)"],
                             key=f"editor_{d}"
                         )
                         edited_dfs.append(edited)
                         st.divider()
 
-                    # Process Deletion
-                    if st.button("🗑️ Delete Selected Rows", type="primary"):
-                        # Collect IDs from all tables
+                    if st.button("💾 Apply Changes (Save Edits & Deletes)", type="primary"):
                         ids_to_delete = []
-                        for ed in edited_dfs:
-                            if not ed.empty and 'Delete' in ed.columns:
-                                 deleted_rows = ed[ed['Delete'] == True]
-                                 if not deleted_rows.empty:
-                                     ids_to_delete.extend(deleted_rows['ID'].tolist())
+                        edits = {}
                         
-                        if not ids_to_delete:
-                            st.warning("No rows selected for deletion.")
+                        for ed in edited_dfs:
+                            if not ed.empty:
+                                if 'Delete' in ed.columns:
+                                    deleted_rows = ed[ed['Delete'] == True]
+                                    ids_to_delete.extend(deleted_rows['ID'].tolist())
+                                
+                                kept_rows = ed[ed['Delete'] == False]
+                                for _, row in kept_rows.iterrows():
+                                    edits[row['ID']] = {
+                                        'Weight': row.get('Weight', ""),
+                                        'Unit': row.get('Unit', ""),
+                                        'Reps': row.get('Reps', ""),
+                                        'RPE': row.get('RPE', ""),
+                                        'Set Type': row.get('Set Type', ""),
+                                        'Memo': row.get('Memo', "")
+                                    }
+                        
+                        if not ids_to_delete and not edits:
+                            st.warning("No changes detected.")
                         else:
-                            st.write(f"Deleting {len(ids_to_delete)} records...")
-                            try:
-                                # 1. Reload latest data
-                                ws_log_current = sh.worksheet(SHEET_TRAINING_LOG)
-                                current_data = ws_log_current.get_all_records()
-                                df_current = pd.DataFrame(current_data)
-                                
-                                # 2. Filter out deleted IDs
-                                if 'ID' in df_current.columns:
-                                    df_current['ID'] = pd.to_numeric(df_current['ID'], errors='coerce').fillna(0).astype(int)
+                            with st.spinner("Saving changes..."):
+                                try:
+                                    ws_log_current = sh.worksheet(SHEET_TRAINING_LOG)
+                                    current_data = ws_log_current.get_all_records()
+                                    df_current = pd.DataFrame(current_data)
                                     
-                                df_remaining = df_current[~df_current['ID'].isin(ids_to_delete)]
-                                
-                                # 3. Rewrite Sheet
-                                ws_log_current.clear()
-                                
-                                headers = df_current.columns.tolist() if not df_current.empty else []
-                                if not headers:
-                                     headers = ["ID", "Date", "ExerciseID", "Target", "Exercise", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"]
-
-                                update_data = [headers] + df_remaining.values.tolist()
-                                ws_log_current.update(range_name='A1', values=update_data, value_input_option='USER_ENTERED')
-                                
-                                st.success(f"Deleted {len(ids_to_delete)} records.")
-                                time.sleep(1)
-                                st.cache_data.clear()
-                                st.rerun()
-                                
-                            except Exception as e:
-                                st.error(f"Failed to delete rows: {e}")
+                                    if 'ID' in df_current.columns:
+                                        df_current['ID'] = pd.to_numeric(df_current['ID'], errors='coerce').fillna(0).astype(int)
+                                        
+                                    df_remaining = df_current[~df_current['ID'].isin(ids_to_delete)].copy()
+                                    
+                                    for i, row in df_remaining.iterrows():
+                                        _id = row['ID']
+                                        if _id in edits:
+                                            edit_vals = edits[_id]
+                                            df_remaining.at[i, 'Weight'] = edit_vals['Weight'] if pd.notna(edit_vals['Weight']) else ""
+                                            df_remaining.at[i, 'Unit'] = edit_vals['Unit'] if pd.notna(edit_vals['Unit']) else ""
+                                            df_remaining.at[i, 'Reps'] = edit_vals['Reps'] if pd.notna(edit_vals['Reps']) else ""
+                                            df_remaining.at[i, 'RPE'] = edit_vals['RPE'] if pd.notna(edit_vals['RPE']) else ""
+                                            df_remaining.at[i, 'Set Type'] = edit_vals['Set Type'] if pd.notna(edit_vals['Set Type']) else ""
+                                            df_remaining.at[i, 'Memo'] = edit_vals['Memo'] if pd.notna(edit_vals['Memo']) else ""
+                                            
+                                    ws_log_current.clear()
+                                    headers = df_current.columns.tolist() if not df_current.empty else ["ID", "Date", "ExerciseID", "Target", "Exercise", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"]
+                                    update_data = [headers] + df_remaining.fillna("").values.tolist()
+                                    ws_log_current.update(range_name='A1', values=update_data, value_input_option='USER_ENTERED')
+                                    
+                                    st.success(f"Changes applied! (Deleted {len(ids_to_delete)}, Checked {len(edits)} for updates).")
+                                    time.sleep(1)
+                                    st.cache_data.clear()
+                                    st.rerun()
+                                    
+                                except Exception as e:
+                                    st.error(f"Failed to apply changes: {e}")
     else:
         st.info("No data available.")
 
@@ -648,7 +583,6 @@ with tab2:
 with tab3:
     st.markdown("### Templates Management")
     
-    # --- Template Creation (Top of tab) ---
     with st.expander("Create New Template", expanded=df_templates.empty):
         with st.form("create_template_form"):
             col_name, col_muscle = st.columns(2)
@@ -672,11 +606,9 @@ with tab3:
                 st.error("Please select at least one exercise.")
             else:
                 try:
-                    # Generate IDs using | as delimiter to prevent GSheet numeric auto-formatting
                     ex_ids = [normalize_id(exercise_map.get(ex, {}).get('exercise_id', '')) for ex in selected_exercises_for_template]
                     ex_ids_str = "|".join(ex_ids)
                     
-                    # New ID
                     if df_templates.empty:
                         new_tid = "TMP001"
                     else:
@@ -709,14 +641,10 @@ with tab3:
     if not df_templates.empty:
         df_temp_display = df_templates.copy()
         
-        # Add Delete checkbox
         if "Delete" not in df_temp_display.columns:
             df_temp_display.insert(0, "Delete", False)
             
-        # Display template list with detail
-        # Display template list with detail
         def get_exercise_names(ids_str):
-            # Support both | (new) and , (old/incorrectly formatted)
             if '|' in str(ids_str):
                 ids = str(ids_str).split('|')
             else:
@@ -741,7 +669,7 @@ with tab3:
                 "Delete": st.column_config.CheckboxColumn("❌", width="small", default=False),
                 "template_id": st.column_config.TextColumn("ID", disabled=True),
                 "template_name": st.column_config.TextColumn("Template Name", width="medium"),
-                "exercise_ids": None, # Hide raw IDs
+                "exercise_ids": None,
                 "created_at": st.column_config.TextColumn("Created At", disabled=True),
                 "Exercises": st.column_config.TextColumn("Exercises", width="large", disabled=True),
             },
@@ -770,4 +698,3 @@ with tab3:
                     st.error(f"Failed to delete templates: {e}")
     else:
         st.info("No templates saved yet.")
-
