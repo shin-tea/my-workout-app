@@ -568,20 +568,26 @@ with tab3:
     st.markdown("### Templates")
     
     with st.expander("Create New Template", expanded=df_templates.empty):
-        with st.form("create_template_form"):
-            col_name, col_muscle = st.columns(2)
-            with col_name:
-                new_template_name = st.text_input("Template Name", placeholder="e.g., Chest Day", key="tab_template_name")
-            with col_muscle:
-                create_muscle_filter = st.selectbox("Filter Exercises by Muscle", ["All"] + muscle_groups_input, key="tab_create_template_muscle")
-                
-            options_to_select = exercise_options
-            if create_muscle_filter != "All":
-                options_to_select = [ex for ex in exercise_options if exercise_map.get(ex, {}).get('target_muscle_group') == create_muscle_filter]
+        col_name, col_muscle = st.columns(2)
+        with col_name:
+            new_template_name = st.text_input("Template Name", placeholder="e.g., Chest Day", key="tab_template_name")
+        with col_muscle:
+            create_muscle_filter = st.selectbox("Filter Exercises by Muscle", ["All"] + muscle_groups_input, key="tab_create_template_muscle")
             
-            selected_exercises_for_template = st.multiselect("Select Exercises (Order is preserved)", options_to_select, key="tab_template_exercises")
-            
-            submitted_template = st.form_submit_button("Save Template", type="primary")
+        base_options = exercise_options
+        if create_muscle_filter != "All":
+            base_options = [ex for ex in exercise_options if exercise_map.get(ex, {}).get('target_muscle_group') == create_muscle_filter]
+        
+        current_selections = st.session_state.get("tab_template_exercises", [])
+        
+        options_to_select = []
+        for ex in base_options + current_selections:
+            if ex not in options_to_select:
+                options_to_select.append(ex)
+        
+        selected_exercises_for_template = st.multiselect("Select Exercises (Order is preserved)", options_to_select, key="tab_template_exercises")
+        
+        submitted_template = st.button("Save Template", type="primary")
         
         if submitted_template:
             if not new_template_name:
@@ -613,6 +619,10 @@ with tab3:
                     ws_templates = sh.worksheet(SHEET_TEMPLATE_MASTER)
                     ws_templates.append_row(new_template_row, value_input_option='USER_ENTERED')
                     
+                    for k in ["tab_template_name", "tab_create_template_muscle", "tab_template_exercises"]:
+                        if k in st.session_state:
+                            del st.session_state[k]
+                            
                     st.success(f"Template '{new_template_name}' saved!")
                     time.sleep(1)
                     st.cache_data.clear()
