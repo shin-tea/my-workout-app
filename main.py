@@ -18,7 +18,16 @@ SCOPES = [
 ]
 
 st.set_page_config(page_title="Workout Tracker", layout="wide", page_icon="💪")
-st.title("Workout Tracker")
+
+col_title, col_action = st.columns([5, 1])
+with col_title:
+    st.title("Workout Tracker")
+with col_action:
+    # タイトルの高さに合わせるための余白
+    st.markdown("<div style='margin-top: 25px;'></div>", unsafe_allow_html=True)
+    if st.button("🔄 Reload Data", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
 
 # --- Connection ---
 @st.cache_resource
