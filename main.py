@@ -106,7 +106,7 @@ template_map = {}
 if not df_templates.empty and 'template_name' in df_templates.columns:
     for _, row in df_templates.iterrows():
         tname = row.get('template_name', '')
-        if tname:
+        if tname and tname.lower() != "select from exercises":
             template_options.append(tname)
             raw_ids = str(row.get('exercise_ids', ''))
             delim = '|' if '|' in raw_ids else ','
@@ -236,7 +236,7 @@ with tab1:
             with col_w:
                 weight = st.number_input("Weight", min_value=0.0, step=2.5, format="%.1f", value=default_weight)
             with col_u:
-                unit = st.selectbox("Unit", units, index=default_unit_idx, key="unit_select")
+                unit = st.selectbox("Unit", units, index=default_unit_idx)
                 
             col_r, col_rpe, col_t = st.columns([1, 1, 1.5])
             with col_r:
@@ -592,6 +592,8 @@ with tab3:
         if submitted_template:
             if not new_template_name:
                 st.error("Please enter a template name.")
+            elif new_template_name.strip().lower() == "select from exercises":
+                st.error("This template name is reserved. Please pick another.")
             elif not selected_exercises_for_template:
                 st.error("Please select at least one exercise.")
             else:
