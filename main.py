@@ -230,6 +230,10 @@ with tab1:
             div[data-testid="stForm"] div[data-testid="stHorizontalBlock"] * {
                 min-width: 0 !important;
             }
+            div[data-testid="stNumberInput"] button {
+                min-width: 2.5rem !important;
+                width: 2.5rem !important;
+            }
         }
         </style>
         """,
@@ -296,10 +300,7 @@ with tab1:
                 
                 st.session_state['success_msg'] = f"Added: {selected_exercise} ({weight}{unit} x {reps})"
                 
-                # Fix filter reset bug: update session state to the logged muscle
-                if target_muscle:
-                    st.session_state['log_muscle_filter'] = target_muscle
-                    
+                time.sleep(1.5)
                 st.cache_data.clear()
                 st.rerun()
             except Exception as e:
