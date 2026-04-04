@@ -641,6 +641,77 @@ with tab3:
                 except Exception as e:
                     st.error(f"Failed to save template: {e}")
 
+    if not df_templates.empty:
+        with st.expander("Edit Existing Template", expanded=False):
+            edit_tid = st.selectbox("Select Template", df_templates['template_id'].tolist(), format_func=lambda x: df_templates[df_templates['template_id']==x]['template_name'].values[0], key="edit_template_selector_tid")
+            
+            if edit_tid:
+                target_row = df_templates[df_templates['template_id'] == edit_tid].iloc[0]
+                
+                raw_ids_str = target_row['exercise_ids']
+                raw_ids = str(raw_ids_str).split('|') if '|' in str(raw_ids_str) else str(raw_ids_str).split(',')
+                
+                existing_exercises = []
+                for eid in raw_ids:
+                    eid_str = normalize_id(eid)
+                    for ex_name, ex_info in exercise_map.items():
+                        if normalize_id(ex_info.get('exercise_id', '')) == eid_str:
+                            existing_exercises.append(ex_name)
+                            break
+                            
+                col_ename, col_emuscle = st.columns(2)
+                with col_ename:
+                    updated_name = st.text_input("Template Name", value=target_row['template_name'], key=f"edit_name_{edit_tid}")
+                with col_emuscle:
+                    edit_muscle_filter = st.selectbox("Filter Exercises by Muscle", ["All"] + muscle_groups_input, key=f"edit_muscle_{edit_tid}")
+                    
+                edit_base_options = exercise_options
+                if edit_muscle_filter != "All":
+                    edit_base_options = [ex for ex in exercise_options if exercise_map.get(ex, {}).get('target_muscle_group') == edit_muscle_filter]
+                
+                current_edit_selections = st.session_state.get(f"edit_exs_{edit_tid}", existing_exercises)
+                
+                options_to_select_edit = []
+                for ex in edit_base_options + current_edit_selections + existing_exercises:
+                    if ex not in options_to_select_edit:
+                        options_to_select_edit.append(ex)
+                
+                updated_exercises = st.multiselect(
+                    "Select Exercises (Order is preserved)", 
+                    options_to_select_edit, 
+                    default=existing_exercises,
+                    key=f"edit_exs_{edit_tid}"
+                )
+                
+                if st.button("Update Template", type="primary", key=f"update_btn_{edit_tid}"):
+                    if not updated_name:
+                        st.error("Please enter a template name.")
+                    elif updated_name.strip().lower() == "select from exercises" and updated_name != target_row['template_name']:
+                        st.error("This template name is reserved. Please pick another.")
+                    elif not updated_exercises:
+                        st.error("Please select at least one exercise.")
+                    else:
+                        try:
+                            new_ex_ids = [normalize_id(exercise_map.get(ex, {}).get('exercise_id', '')) for ex in updated_exercises]
+                            new_ex_ids_str = "|".join(new_ex_ids)
+                            
+                            idx_to_update = df_templates.index[df_templates['template_id'] == edit_tid].tolist()[0]
+                            df_templates.at[idx_to_update, 'template_name'] = updated_name
+                            df_templates.at[idx_to_update, 'exercise_ids'] = new_ex_ids_str
+                            
+                            ws_templates = sh.worksheet(SHEET_TEMPLATE_MASTER)
+                            ws_templates.clear()
+                            headers = df_templates.columns.tolist()
+                            update_data = [headers] + df_templates.values.tolist()
+                            ws_templates.update(range_name='A1', values=update_data, value_input_option='USER_ENTERED')
+                            
+                            st.success(f"Template '{updated_name}' updated successfully!")
+                            time.sleep(1)
+                            st.cache_data.clear()
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed to update template: {e}")
+
     st.divider()
     st.markdown("### Saved")
     if not df_templates.empty:
