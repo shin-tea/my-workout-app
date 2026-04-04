@@ -208,7 +208,7 @@ with tab1:
                     st.session_state['template_current_idx'] = template_exercise_names.index(selected_exercise)
                     
         if template_memo:
-            st.info(f"**Template Memo:** {template_memo}")
+            st.info(f"**Memo**\n\n{template_memo}")
     else:
         with col_1:
             selected_muscle_input = st.selectbox("Filter Muscle", ["All"] + muscle_groups_input, key="log_muscle_filter")
