@@ -73,11 +73,25 @@ def load_data():
         
         try:
             ws_templates = sh.worksheet(SHEET_TEMPLATE_MASTER)
-            data_templates = ws_templates.get_all_records()
-            df_templates = pd.DataFrame(data_templates)
+            raw_values = ws_templates.get_all_values()
+            if not raw_values:
+                headers = ["template_id", "template_name", "exercise_ids", "created_at", "memo"]
+                ws_templates.append_row(headers, value_input_option='USER_ENTERED')
+                df_templates = pd.DataFrame(columns=headers)
+            else:
+                headers = raw_values[0]
+                if "memo" not in headers:
+                    headers.append("memo")
+                    ws_templates.update(range_name='A1', values=[headers], value_input_option='USER_ENTERED')
+                    data_templates = ws_templates.get_all_records()
+                else:
+                    data_templates = ws_templates.get_all_records()
+                df_templates = pd.DataFrame(data_templates)
+                if 'memo' not in df_templates.columns:
+                     df_templates['memo'] = ""
         except gspread.exceptions.WorksheetNotFound:
             ws_templates = sh.add_worksheet(title=SHEET_TEMPLATE_MASTER, rows=100, cols=10)
-            headers = ["template_id", "template_name", "exercise_ids", "created_at"]
+            headers = ["template_id", "template_name", "exercise_ids", "created_at", "memo"]
             ws_templates.append_row(headers, value_input_option='USER_ENTERED')
             df_templates = pd.DataFrame(columns=headers)
         
@@ -118,7 +132,11 @@ if not df_templates.empty and 'template_name' in df_templates.columns:
             template_options.append(tname)
             raw_ids = str(row.get('exercise_ids', ''))
             delim = '|' if '|' in raw_ids else ','
-            template_map[tname] = raw_ids.split(delim) if raw_ids else []
+            ex_ids = raw_ids.split(delim) if raw_ids else []
+            template_map[tname] = {
+                'exercise_ids': ex_ids,
+                'memo': str(row.get('memo', ''))
+            }
 
 def normalize_id(val):
     if pd.isna(val): return ""
@@ -154,7 +172,8 @@ with tab1:
         st.session_state['last_template'] = selected_template_option
 
     using_template = selected_template_option != "Select from Exercises"
-    exercise_ids_in_template = template_map.get(selected_template_option, []) if using_template else []
+    exercise_ids_in_template = template_map.get(selected_template_option, {}).get('exercise_ids', []) if using_template else []
+    template_memo = template_map.get(selected_template_option, {}).get('memo', '') if using_template else ""
     
     selected_exercise = None
 
@@ -187,6 +206,9 @@ with tab1:
                 )
                 if selected_exercise in template_exercise_names:
                     st.session_state['template_current_idx'] = template_exercise_names.index(selected_exercise)
+                    
+        if template_memo:
+            st.info(f"**Template Memo:** {template_memo}")
     else:
         with col_1:
             selected_muscle_input = st.selectbox("Filter Muscle", ["All"] + muscle_groups_input, key="log_muscle_filter")
@@ -595,6 +617,7 @@ with tab3:
                 options_to_select.append(ex)
         
         selected_exercises_for_template = st.multiselect("Select Exercises (Order is preserved)", options_to_select, key="tab_template_exercises")
+        template_memo_input = st.text_area("Template Memo", placeholder="Write any notes for this template...", key="tab_template_memo")
         
         submitted_template = st.button("Save Template", type="primary")
         
@@ -624,13 +647,14 @@ with tab3:
                         new_tid,
                         new_template_name,
                         ex_ids_str,
-                        datetime.date.today().strftime("%Y/%m/%d")
+                        datetime.date.today().strftime("%Y/%m/%d"),
+                        template_memo_input
                     ]
                     
                     ws_templates = sh.worksheet(SHEET_TEMPLATE_MASTER)
                     ws_templates.append_row(new_template_row, value_input_option='USER_ENTERED')
                     
-                    for k in ["tab_template_name", "tab_create_template_muscle", "tab_template_exercises"]:
+                    for k in ["tab_template_name", "tab_create_template_muscle", "tab_template_exercises", "tab_template_memo"]:
                         if k in st.session_state:
                             del st.session_state[k]
                             
@@ -683,6 +707,9 @@ with tab3:
                     key=f"edit_exs_{edit_tid}"
                 )
                 
+                existing_memo = str(target_row.get('memo', ''))
+                updated_memo = st.text_area("Template Memo", value=existing_memo, key=f"edit_memo_{edit_tid}")
+                
                 if st.button("Update Template", type="primary", key=f"update_btn_{edit_tid}"):
                     if not updated_name:
                         st.error("Please enter a template name.")
@@ -698,6 +725,7 @@ with tab3:
                             idx_to_update = df_templates.index[df_templates['template_id'] == edit_tid].tolist()[0]
                             df_templates.at[idx_to_update, 'template_name'] = updated_name
                             df_templates.at[idx_to_update, 'exercise_ids'] = new_ex_ids_str
+                            df_templates.at[idx_to_update, 'memo'] = updated_memo
                             
                             ws_templates = sh.worksheet(SHEET_TEMPLATE_MASTER)
                             ws_templates.clear()
@@ -748,6 +776,7 @@ with tab3:
                 "exercise_ids": None,
                 "created_at": st.column_config.TextColumn("Created At", disabled=True),
                 "Exercises": st.column_config.TextColumn("Exercises", width="large", disabled=True),
+                "memo": st.column_config.TextColumn("Memo", width="medium", disabled=True),
             },
             key="template_list_editor"
         )
