@@ -218,8 +218,9 @@ with tab1:
                 filtered_options = [ex for ex in exercise_options if exercise_map.get(ex, {}).get('target_muscle_group') == selected_muscle_input]
             selected_exercise = st.selectbox("Exercise", filtered_options, key="log_ex_select_normal")
 
-    # Dynamic defaults for Weight and Unit based on past records
+    # Dynamic defaults for Weight, Reps and Unit based on past records
     default_weight = 0.0
+    default_reps = 10
     default_unit_idx = 0 if 'kg' in units else 0
     if not df_log.empty and selected_exercise:
         df_ex = df_log[df_log['Exercise'] == selected_exercise]
@@ -230,6 +231,11 @@ with tab1:
             except ValueError:
                 pass
             
+            try:
+                default_reps = int(last_rec.get('Reps', 10))
+            except ValueError:
+                pass
+
             last_unit = str(last_rec.get('Unit', ''))
             if last_unit in units:
                 default_unit_idx = units.index(last_unit)
@@ -268,21 +274,21 @@ with tab1:
 
             col_w, col_u = st.columns([2, 1])
             with col_w:
-                weight = st.number_input("Weight", min_value=0.0, step=2.5, format="%.1f", value=default_weight)
+                weight = st.number_input("Weight", min_value=0.0, step=2.5, format="%.1f", value=default_weight, key=f"weight_{selected_exercise}")
             with col_u:
-                unit = st.selectbox("Unit", units, index=default_unit_idx)
+                unit = st.selectbox("Unit", units, index=default_unit_idx, key=f"unit_{selected_exercise}")
                 
             col_r, col_rpe, col_t = st.columns([1, 1, 1.5])
             with col_r:
-                reps = st.number_input("Reps", min_value=0, step=1, value=10)
+                reps = st.number_input("Reps", min_value=0, step=1, value=default_reps, key=f"reps_{selected_exercise}")
             with col_rpe:
-                rpe = st.number_input("RPE", min_value=1.0, max_value=10.0, step=0.5, value=None)
+                rpe = st.number_input("RPE", min_value=1.0, max_value=10.0, step=0.5, value=None, key=f"rpe_{selected_exercise}")
             with col_t:
                 set_type_idx = 0
                 if 'Main' in set_types: set_type_idx = set_types.index('Main')
-                set_type = st.selectbox("Set Type", set_types, index=set_type_idx)
+                set_type = st.selectbox("Set Type", set_types, index=set_type_idx, key=f"set_type_{selected_exercise}")
                 
-            memo = st.text_input("Memo")
+            memo = st.text_input("Memo", key=f"memo_{selected_exercise}")
             
             submitted = st.form_submit_button("Add Log", type="primary")
 
