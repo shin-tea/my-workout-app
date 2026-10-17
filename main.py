@@ -50,11 +50,20 @@ def init_connection():
 
 
 @st.cache_data(ttl=3600)
-def load_data(_spreadsheet):
-    return sheets.read_data(_spreadsheet)
+def load_log(_spreadsheet):
+    return sheets.read_log(_spreadsheet)
 
 
-def save_changes(action, message, reset_keys=()):
+@st.cache_data(ttl=3600)
+def load_reference_data(_spreadsheet):
+    return sheets.read_reference_data(_spreadsheet)
+
+
+def load_data(spreadsheet):
+    return (load_log(spreadsheet), *load_reference_data(spreadsheet))
+
+
+def save_changes(action, message, reset_keys=(), refresh="log"):
     """Share error handling and show success after reloading fresh sheet data."""
     try:
         action()
@@ -65,7 +74,10 @@ def save_changes(action, message, reset_keys=()):
         st.session_state.pop(key, None)
     reset_history()
     st.session_state["success_msg"] = message
-    st.cache_data.clear()
+    if refresh == "references":
+        load_reference_data.clear()
+    else:
+        load_log.clear()
     st.rerun()
 
 
@@ -126,7 +138,7 @@ def select_log_exercise(exercises, templates):
         )
 
 
-def render_log(log, exercises, templates, units, set_types, spreadsheet):
+def render_log(log, exercises, templates, units, set_types, spreadsheet, master_headers):
     st.markdown("### Log")
     exercise_id = select_log_exercise(exercises, templates)
     if exercise_id is None:
@@ -174,7 +186,7 @@ def render_log(log, exercises, templates, units, set_types, spreadsheet):
             "RPE": float(rpe) if rpe is not None else "", "Set Type": set_type, "Memo": memo,
         }
         save_changes(
-            lambda: sheets.append_log(spreadsheet, record),
+            lambda: sheets.append_log(spreadsheet, record, log.attrs["sheet_headers"], master_headers),
             f"Added: {exercise['exercise_name']} ({weight}{unit} x {reps})",
             reset_keys=[f"{field}_{exercise_id}" for field in ("weight", "unit", "reps")],
         )
@@ -251,6 +263,7 @@ def render_notes(exercise_id, exercise, spreadsheet):
         save_changes(
             lambda: sheets.save_description(spreadsheet, exercise_id, description),
             "Description updated!",
+            refresh="references",
         )
 
 
@@ -407,6 +420,7 @@ def render_template_form(exercises, spreadsheet, template=None):
     save_changes(
         lambda: sheets.save_template(spreadsheet, record, template_id),
         f"Template '{name}' {'updated' if editing else 'saved'}!", reset_keys,
+        refresh="references",
     )
 
 
@@ -455,6 +469,7 @@ def render_templates(exercises, templates, spreadsheet):
         save_changes(
             lambda: sheets.delete_templates(spreadsheet, selected),
             f"Deleted {len(selected)} template(s).",
+            refresh="references",
         )
 
 
@@ -469,7 +484,9 @@ def main():
             for key in list(st.session_state):
                 if key.startswith(("weight_", "unit_", "reps_")):
                     st.session_state.pop(key)
-            st.cache_data.clear()
+            sheets.clear_sheet_cache()
+            load_log.clear()
+            load_reference_data.clear()
             st.rerun()
     st.markdown(MOBILE_FORM_CSS, unsafe_allow_html=True)
     if message := st.session_state.pop("success_msg", None):
@@ -510,7 +527,9 @@ def main():
                 st.caption("Correct the listed values in Training Log, then click Reload. Original values are preserved.")
     log_tab, history_tab, templates_tab = st.tabs(["Log & Analysis", "History & Edit", "Templates"])
     with log_tab:
-        exercise_id = render_log(log, exercises, templates, units, set_types, spreadsheet)
+        exercise_id = render_log(
+            log, exercises, templates, units, set_types, spreadsheet, master.attrs["sheet_headers"]
+        )
         render_analysis(log, exercise_id, exercises, spreadsheet)
     with history_tab:
         render_history(log, units, set_types, spreadsheet)

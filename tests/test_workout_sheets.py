@@ -2,6 +2,7 @@
 
 import unittest
 import uuid
+from unittest.mock import MagicMock
 
 import workout_sheets as sheets
 
@@ -20,7 +21,7 @@ class FakeSheet:
         return list(self.headers)
 
     def get_all_records(self):
-        return [dict(row) for row in self.rows]
+        return [{header: row.get(header, '') for header in self.headers} for row in self.rows]
 
     def update_cell(self, row, column, value):
         assert row == 1
@@ -58,6 +59,82 @@ class FakeSpreadsheet:
 
 
 class PersistenceTests(unittest.TestCase):
+    def test_worksheet_metadata_lookup_is_cached_and_can_be_cleared(self):
+        spreadsheet = MagicMock()
+        worksheet = MagicMock()
+        spreadsheet.worksheet.return_value = worksheet
+
+        sheets.clear_sheet_cache()
+        self.assertIs(sheets.get_worksheet(spreadsheet, sheets.TRAINING_LOG), worksheet)
+        self.assertIs(sheets.get_worksheet(spreadsheet, sheets.TRAINING_LOG), worksheet)
+        self.assertEqual(spreadsheet.worksheet.call_count, 1)
+
+        sheets.clear_sheet_cache()
+        self.assertIs(sheets.get_worksheet(spreadsheet, sheets.TRAINING_LOG), worksheet)
+        self.assertEqual(spreadsheet.worksheet.call_count, 2)
+
+    def test_read_log_fetches_only_log_and_keeps_headers_when_empty(self):
+        spreadsheet = MagicMock()
+        log = MagicMock()
+        headers = ['ID', 'Date', 'ExerciseID', 'Weight']
+        log.row_values.return_value = headers
+        log.get_all_records.return_value = []
+        spreadsheet.worksheet.return_value = log
+
+        frame = sheets.read_log(spreadsheet)
+        self.assertEqual(list(frame.columns), headers)
+        self.assertEqual(frame.attrs['sheet_headers'], headers)
+        spreadsheet.worksheet.assert_called_once_with(sheets.TRAINING_LOG)
+
+    def test_append_with_cached_headers_skips_header_and_master_reads(self):
+        spreadsheet = MagicMock()
+        log = MagicMock()
+        spreadsheet.worksheet.return_value = log
+        sheets.clear_sheet_cache()
+        log_headers = ['Date', 'ID', 'ExerciseID', 'Exercise', 'Weight']
+        master_headers = ['exercise_name', 'exercise_id']
+
+        for date, weight in [('2026/01/01', 40), ('2026/01/02', 45)]:
+            sheets.append_log(
+                spreadsheet,
+                {'Date': date, 'ExerciseID': '27', 'Weight': weight},
+                log_headers=log_headers,
+                master_headers=master_headers,
+            )
+
+        self.assertEqual(log.row_values.call_count, 0)
+        self.assertEqual(spreadsheet.worksheet.call_count, 1)
+        self.assertTrue(all(call.args[0] == sheets.TRAINING_LOG for call in spreadsheet.worksheet.call_args_list))
+        self.assertEqual(log.append_row.call_count, 2)
+        first_values = log.append_row.call_args_list[0].args[0]
+        self.assertEqual(first_values[0], '2026/01/01')
+        self.assertEqual(uuid.UUID(first_values[1]).version, 4)
+        self.assertEqual(first_values[2:3], ['27'])
+        self.assertTrue(first_values[3].startswith('=IF('))
+        self.assertIn("'Exercise Master'!$B:$B", first_values[3])
+        self.assertEqual(first_values[4], 40)
+        self.assertEqual(log.append_row.call_args_list[0].kwargs['value_input_option'], 'USER_ENTERED')
+
+    def test_read_reference_data_fetches_only_reference_sheets(self):
+        spreadsheet = MagicMock()
+        training_log = MagicMock()
+        training_log.title = sheets.TRAINING_LOG
+        sheets_by_title = [training_log]
+        for title in (sheets.EXERCISE_MASTER, sheets.CONSTANTS, sheets.TEMPLATE_MASTER):
+            worksheet = MagicMock()
+            worksheet.title = title
+            worksheet.get_all_records.return_value = []
+            worksheet.row_values.return_value = ['id']
+            sheets_by_title.append(worksheet)
+        spreadsheet.worksheets.return_value = sheets_by_title
+
+        result = sheets.read_reference_data(spreadsheet)
+        self.assertEqual(len(result), 3)
+        spreadsheet.worksheets.assert_called_once_with()
+        self.assertEqual(spreadsheet.worksheet.call_count, 0)
+        training_log.get_all_records.assert_not_called()
+        sheets_by_title[1].get_all_records.assert_called_once_with()
+
     def test_id_migration_updates_only_legacy_ids_in_actual_id_column(self):
         preserved = '8f923c1e-70be-40ca-aa43-d7c0f9b8c86e'
         headers = ['Date', 'Weight', 'ID', 'ExerciseID']

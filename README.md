@@ -79,3 +79,17 @@ Previous-set defaults come from the latest valid workout date for the selected
 exercise. Sets on the same date follow sheet row order, so a backdated record does
 not replace a newer workout's defaults. Negative assistance weights are retained,
 but are not used as defaults in the non-negative weight entry form.
+
+## Save performance
+
+The UI caches Training Log separately from exercise, constants and template data.
+A log save invalidates only Training Log; description and template saves refresh
+only reference data. The saved log is still read back from Google Sheets before
+displaying updated results. History conflict checks always read fresh sheet values.
+
+New records reuse the loaded column headers and a cached worksheet handle. After
+the initial load, adding a set normally needs just the append request and a log
+read, without re-fetching master headers or all reference sheets. Read operations
+also reuse headers returned with records rather than requesting them separately.
+If you manually reorder sheet columns or replace a worksheet, click Reload before
+entering records so both headers and worksheet metadata are refreshed.
