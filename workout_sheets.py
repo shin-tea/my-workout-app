@@ -1,5 +1,9 @@
 """Read and write workout sheets. This module does not render UI."""
 
+from functools import wraps
+from threading import RLock
+from uuid import uuid4
+
 import pandas as pd
 
 from workout_data import (
@@ -7,6 +11,8 @@ from workout_data import (
     delete_row_requests,
     exercise_name_formula,
     history_update_requests,
+    index_log_rows,
+    is_uuid,
     next_template_id,
     normalize_id,
 )
@@ -16,6 +22,16 @@ EXERCISE_MASTER = "Exercise Master"
 CONSTANTS = "Constants"
 TEMPLATE_MASTER = "Template Master"
 TEMPLATE_HEADERS = ["template_id", "template_name", "exercise_ids", "created_at", "memo"]
+WRITE_LOCK = RLock()
+
+
+def serialized_write(function):
+    """Keep read/check/write sequences together across sessions in this server."""
+    @wraps(function)
+    def write(*args, **kwargs):
+        with WRITE_LOCK:
+            return function(*args, **kwargs)
+    return write
 
 
 def connect(settings):
@@ -53,23 +69,44 @@ def read_data(spreadsheet):
     )
 
 
+@serialized_write
 def append_log(spreadsheet, record):
     sheet = spreadsheet.worksheet(TRAINING_LOG)
     headers = sheet.row_values(1)
     master_headers = spreadsheet.worksheet(EXERCISE_MASTER).row_values(1)
-    record = {**record, "Exercise": exercise_name_formula(headers, master_headers)}
+    record = {**record, "ID": str(uuid4()), "Exercise": exercise_name_formula(headers, master_headers)}
     sheet.append_row([record.get(header, "") for header in headers], value_input_option="USER_ENTERED")
 
 
-def save_history(spreadsheet, edits, deleted_ids):
+@serialized_write
+def migrate_record_ids(spreadsheet):
+    """Convert legacy record IDs once; preserve UUIDs and every other cell."""
+    sheet = spreadsheet.worksheet(TRAINING_LOG)
+    rows = sheet.get_all_records()
+    index_log_rows(rows)
+    if not rows:
+        return 0
+    column = column_letter(sheet.row_values(1).index("ID") + 1)
+    updates = [
+        {"range": f"{column}{row_number}", "values": [[str(uuid4())]]}
+        for row_number, row in enumerate(rows, 2) if not is_uuid(row["ID"])
+    ]
+    if updates:
+        sheet.batch_update(updates, value_input_option="RAW")
+    return len(updates)
+
+
+@serialized_write
+def save_history(spreadsheet, edits, deleted_ids, original_rows):
     sheet = spreadsheet.worksheet(TRAINING_LOG)
     requests = history_update_requests(
-        sheet.id, sheet.row_values(1), sheet.get_all_records(), edits, deleted_ids
+        sheet.id, sheet.row_values(1), sheet.get_all_records(), edits, deleted_ids, original_rows
     )
     if requests:
         spreadsheet.batch_update({"requests": requests})
 
 
+@serialized_write
 def update_record(sheet, key_column, record_id, changes):
     """Read current row positions and update only the requested cells."""
     headers = sheet.row_values(1)
@@ -92,6 +129,7 @@ def save_description(spreadsheet, exercise_id, description):
     )
 
 
+@serialized_write
 def save_template(spreadsheet, record, template_id=None):
     sheet = spreadsheet.worksheet(TEMPLATE_MASTER)
     if template_id is not None:
@@ -104,6 +142,7 @@ def save_template(spreadsheet, record, template_id=None):
     )
 
 
+@serialized_write
 def delete_templates(spreadsheet, template_ids):
     sheet = spreadsheet.worksheet(TEMPLATE_MASTER)
     selected = {normalize_id(value) for value in template_ids}

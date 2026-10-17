@@ -1,6 +1,7 @@
 """Persistence checks use an in-memory sheet; Google is never contacted."""
 
 import unittest
+import uuid
 
 import workout_sheets as sheets
 
@@ -64,12 +65,39 @@ class PersistenceTests(unittest.TestCase):
         record = {'ID': 1, 'ExerciseID': '27', 'Weight': 40}
         sheets.append_log(spreadsheet, record)
         values, mode = log.appended[0]
-        self.assertEqual(values[:2], [1, '27'])
+        self.assertEqual(uuid.UUID(values[0]).version, 4)
+        self.assertEqual(values[1], '27')
         self.assertTrue(values[2].startswith('=IF('))
         self.assertIn('INDEX($B:$B,ROW())', values[2])
         self.assertEqual(values[3], 40)
         self.assertEqual(mode, 'USER_ENTERED')
         self.assertNotIn('Exercise', record)
+
+    def test_new_log_replaces_supplied_id_with_uuid(self):
+        log = FakeSheet(sheets.TRAINING_LOG, ['ID', 'ExerciseID'])
+        master = FakeSheet(sheets.EXERCISE_MASTER, ['exercise_id', 'exercise_name'])
+        sheets.append_log(FakeSpreadsheet(log, master), {'ID': 17, 'ExerciseID': '27'})
+        values, _ = log.appended[0]
+        self.assertEqual(uuid.UUID(values[0]).version, 4)
+        self.assertNotEqual(values[0], '17')
+
+    def test_history_saves_existing_numeric_id_and_detects_concurrent_change(self):
+        headers = ['ID', 'Date', 'ExerciseID', 'Target', 'Exercise', 'Weight', 'Unit',
+                   'Reps', 'RPE', 'Set Type', 'Memo']
+        baseline = {'ID': 17, 'Date': '2026/01/01', 'ExerciseID': 27, 'Target': '',
+                    'Exercise': 'Row', 'Weight': 30, 'Unit': 'kg', 'Reps': 10,
+                    'RPE': '', 'Set Type': '', 'Memo': ''}
+        log = FakeSheet(sheets.TRAINING_LOG, headers, [baseline], sheet_id=7)
+        spreadsheet = FakeSpreadsheet(log)
+        sheets.save_history(spreadsheet, {'17': {'Weight': 35}}, [], [baseline])
+        self.assertEqual(len(spreadsheet.requests), 1)
+        self.assertEqual(spreadsheet.requests[0]['requests'][0]['updateCells']['rows'][0]['values'][0]
+                         ['userEnteredValue'], {'numberValue': 35.0})
+
+        log.rows[0]['Weight'] = 32
+        with self.assertRaisesRegex(ValueError, 'Reload'):
+            sheets.save_history(spreadsheet, {'17': {'Weight': 35}}, [], [baseline])
+        self.assertEqual(len(spreadsheet.requests), 1)
 
     def test_description_changes_only_the_matching_cell(self):
         master = FakeSheet(sheets.EXERCISE_MASTER, ['exercise_id', 'exercise_name', 'description'], [

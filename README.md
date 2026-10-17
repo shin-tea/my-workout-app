@@ -40,3 +40,42 @@ this means the 16 rows named One Hand Arm Curl with ID 40 resolve to Preacher Cu
 (Machine); the IDs themselves are not changed.
 
 Offline checks: `python -m unittest discover -s tests -v`.
+
+## Record IDs and concurrent edits
+
+New workout records receive a UUID at save time. Existing numeric record IDs and
+all exercise IDs remain valid; existing rows do not need migration. UUIDs identify
+records and are not used to infer when a set was performed.
+
+To use UUIDs consistently, open **History & Edit → Record IDs → Convert existing
+record IDs to UUIDs** once. This reads the current Training Log and replaces only
+non-UUID ID cells in one batch. Existing UUIDs, ExerciseID, lookup formulas and all
+workout values stay unchanged. Blank or duplicate IDs stop the conversion. Once
+all IDs are UUIDs, the action disappears. Reload other open app views afterwards;
+edits based on the old IDs are rejected until reloaded.
+
+History keeps the original rows shown in each editor and sends only fields that
+the user actually changed. Before writing, the app reads the current sheet and
+checks those fields against the originals. Conflicting edits, missing records and
+duplicate IDs stop the whole save with a Reload message. Deletions also check the
+record's date, exercise ID, target and all editable fields. Click Reload to discard
+the old editor snapshot and start from the latest data.
+
+Writes are serialized across sessions in the same app server. The read/check/write
+sequence is not a database transaction against Google Sheets: direct sheet edits
+or a separate server can still race after the check. Strict coordination across
+independent writers would require a shared transactional backend.
+
+## Invalid values and previous-set defaults
+
+Date, Weight and Reps keep their original source values alongside parsed analysis
+values. Invalid dates, non-finite/non-numeric weights, invalid repetitions and
+blank/duplicate record IDs appear in Records needing correction with their sheet
+row numbers. They are excluded from charts and editable history, not changed to
+zero or written back automatically. Correct those values in Training Log, then
+Reload. Mixed slash/hyphen date formats are accepted.
+
+Previous-set defaults come from the latest valid workout date for the selected
+exercise. Sets on the same date follow sheet row order, so a backdated record does
+not replace a newer workout's defaults. Negative assistance weights are retained,
+but are not used as defaults in the non-negative weight entry form.

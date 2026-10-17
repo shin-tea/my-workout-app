@@ -1,8 +1,18 @@
 """Workout calculations and sheet request builders, without UI or network access."""
 
+import math
 from numbers import Real
+from uuid import UUID
 
 import pandas as pd
+
+
+def is_uuid(value):
+    try:
+        UUID(str(value))
+        return True
+    except (ValueError, TypeError, AttributeError):
+        return False
 
 
 def normalize_id(value):
@@ -41,14 +51,45 @@ def prepare_log(log, master):
     result = resolve_exercise_names(log, master)
     if result.empty:
         return result
-    result["ID"] = pd.to_numeric(result["ID"], errors="coerce").fillna(0).astype(int)
-    result["Date"] = pd.to_datetime(result["Date"], errors="coerce")
+    result["ID"] = result["ID"].map(normalize_id)
+    result["_Row"] = range(len(result))
+    for field in ("Date", "Weight", "Reps"):
+        result[f"Original {field}"] = result[field]
+    # A bare number is not a workout date (pandas would otherwise treat it as Unix time).
+    dates = result["Date"].where(~result["Date"].map(lambda value: isinstance(value, Real)))
+    result["Date"] = pd.to_datetime(dates, format="mixed", errors="coerce")
     for field in ("Weight", "Reps"):
-        result[field] = pd.to_numeric(result[field], errors="coerce").fillna(0)
-    is_lbs = result["Unit"].astype(str).str.lower().eq("lbs")
+        values = pd.to_numeric(result[field], errors="coerce")
+        result[field] = values.where(values.map(lambda value: pd.notna(value) and math.isfinite(value)))
+    issues = [[] for _ in range(len(result))]
+    invalid = {field: result[field].isna() for field in ("Date", "Weight", "Reps")}
+    invalid["Reps"] |= result["Reps"].lt(0) | result["Reps"].mod(1).ne(0)
+    invalid["ID"] = result["ID"].eq("") | result["ID"].duplicated(keep=False)
+    for field, mask in invalid.items():
+        for index, bad in enumerate(mask):
+            if bad:
+                issues[index].append(field)
+    result["Data Issues"] = issues
+    units = result.get("Unit", pd.Series("kg", index=result.index))
+    is_lbs = units.astype(str).str.lower().eq("lbs")
     result["Weight (kg)"] = result["Weight"].where(~is_lbs, result["Weight"] * 0.453592)
     result["Estimated 1RM (kg)"] = result["Weight (kg)"] * (1 + result["Reps"] / 30)
     return result
+
+
+def valid_log_rows(log):
+    return log[log["Data Issues"].map(len).eq(0)] if not log.empty else log
+
+
+def latest_exercise_record(log, exercise_id):
+    if log.empty:
+        return {}
+    records = exercise_records(valid_log_rows(log), exercise_id)
+    # Negative assistance weights cannot be used as a non-negative form default.
+    records = records[records["Weight"].ge(0)]
+    if records.empty:
+        return {}
+    return records.sort_values(["Date", "_Row"], kind="stable").iloc[-1].to_dict()
 
 
 def template_exercise_ids(value):
@@ -95,9 +136,56 @@ def exercise_name_formula(log_headers, master_headers):
 
 
 EDITABLE_LOG_FIELDS = ("Weight", "Unit", "Reps", "RPE", "Set Type", "Memo")
+IDENTITY_FIELDS = ("Date", "ExerciseID", "Target")
 
 
-def history_update_requests(sheet_id, headers, current_rows, edits, deleted_ids):
+def comparable_value(value, field):
+    if pd.isna(value) or value == "":
+        return ""
+    if field == "ExerciseID":
+        return normalize_id(value)
+    if field in ("Weight", "Reps", "RPE"):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return str(value)
+    if field == "Date":
+        try:
+            return pd.Timestamp(value)
+        except (TypeError, ValueError):
+            return str(value)
+    return value
+
+
+def index_log_rows(rows):
+    indexed = {}
+    for row in rows:
+        key = normalize_id(row.get("ID"))
+        if not key or key in indexed:
+            raise ValueError("Blank or duplicate record ID. Correct Training Log and Reload.")
+        indexed[key] = row
+    return indexed
+
+
+def collect_history_changes(original_rows, edited_rows):
+    originals = index_log_rows(original_rows)
+    edits, deleted_ids = {}, []
+    for row in edited_rows:
+        key = normalize_id(row["ID"])
+        if row.get("Delete", False):
+            deleted_ids.append(key)
+            continue
+        changes = {
+            field: row.get(field, "") for field in EDITABLE_LOG_FIELDS
+            if comparable_value(row.get(field, ""), field)
+            != comparable_value(originals[key].get(field, ""), field)
+        }
+        if changes:
+            edits[key] = changes
+    return edits, deleted_ids
+
+
+def history_update_requests(sheet_id, headers, current_rows, edits, deleted_ids, original_rows):
     """Update only editable cells; retain lookup formulas and all other columns.
 
     One Sheets batch applies cell edits before deleting rows from bottom to top.
@@ -105,6 +193,18 @@ def history_update_requests(sheet_id, headers, current_rows, edits, deleted_ids)
     """
     deleted_ids = {normalize_id(value) for value in deleted_ids}
     edits = {normalize_id(key): value for key, value in edits.items()}
+    current = index_log_rows(current_rows)
+    originals = index_log_rows(original_rows)
+    # Validate the whole operation before building or sending any write requests.
+    for key in set(edits) | deleted_ids:
+        if key not in current or key not in originals:
+            raise ValueError(f"Record {key} no longer exists. Reload before saving.")
+        fields = set(IDENTITY_FIELDS) | (set(EDITABLE_LOG_FIELDS) if key in deleted_ids else set(edits[key]))
+        for field in fields:
+            before = originals[key].get(f"Original {field}", originals[key].get(field, ""))
+            now = current[key].get(field, "")
+            if comparable_value(before, field) != comparable_value(now, field):
+                raise ValueError(f"Record {key}: {field} changed in another view. Reload before saving.")
     requests, delete_indexes = [], []
     for row_index, row in enumerate(current_rows, 1):
         key = normalize_id(row.get("ID"))
@@ -113,12 +213,13 @@ def history_update_requests(sheet_id, headers, current_rows, edits, deleted_ids)
             continue
         if key not in edits:
             continue
-        for field in EDITABLE_LOG_FIELDS:
-            value = edits[key][field]
+        for field, value in edits[key].items():
+            if field not in EDITABLE_LOG_FIELDS:
+                raise ValueError(f"Field {field} cannot be edited.")
             if pd.isna(value):
                 value = ""
             old_value = row.get(field, "")
-            if value == ("" if old_value is None else old_value):
+            if comparable_value(value, field) == comparable_value(old_value, field):
                 continue
             if isinstance(value, Real):
                 entered_value = {"numberValue": float(value)}

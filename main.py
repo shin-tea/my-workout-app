@@ -8,11 +8,14 @@ import streamlit as st
 
 import workout_sheets as sheets
 from workout_data import (
-    EDITABLE_LOG_FIELDS,
+    collect_history_changes,
     exercise_records,
+    latest_exercise_record,
+    is_uuid,
     normalize_id,
     prepare_log,
     template_exercises,
+    valid_log_rows,
 )
 
 NO_TEMPLATE = "Select from Exercises"
@@ -60,9 +63,16 @@ def save_changes(action, message, reset_keys=()):
         return
     for key in reset_keys:
         st.session_state.pop(key, None)
+    reset_history()
     st.session_state["success_msg"] = message
     st.cache_data.clear()
     st.rerun()
+
+
+def reset_history():
+    for key in list(st.session_state):
+        if key.startswith(("history_original_", "editor_")):
+            st.session_state.pop(key)
 
 
 def exercise_label(exercises, exercise_id):
@@ -122,8 +132,7 @@ def render_log(log, exercises, templates, units, set_types, spreadsheet):
     if exercise_id is None:
         return None
     exercise = exercises[exercise_id]
-    records = exercise_records(log, exercise_id) if not log.empty else log
-    previous = records.iloc[-1] if not records.empty else {}
+    previous = latest_exercise_record(log, exercise_id)
     default_unit = previous.get("Unit", "kg")
     unit_index = units.index(default_unit) if default_unit in units else 0
 
@@ -158,7 +167,6 @@ def render_log(log, exercises, templates, units, set_types, spreadsheet):
 
     if submitted:
         record = {
-            "ID": int(log["ID"].max()) + 1 if not log.empty else 1,
             "Date": date.strftime("%Y/%m/%d"),
             "ExerciseID": exercise_id,
             "Target": exercise.get("target_muscle_group", ""),
@@ -168,6 +176,7 @@ def render_log(log, exercises, templates, units, set_types, spreadsheet):
         save_changes(
             lambda: sheets.append_log(spreadsheet, record),
             f"Added: {exercise['exercise_name']} ({weight}{unit} x {reps})",
+            reset_keys=[f"{field}_{exercise_id}" for field in ("weight", "unit", "reps")],
         )
     return exercise_id
 
@@ -180,7 +189,7 @@ def render_analysis(log, exercise_id, exercises, spreadsheet):
         return
     if exercise_id is None:
         return
-    records = exercise_records(log, exercise_id).dropna(subset=["Date"]).sort_values("ID").copy()
+    records = exercise_records(valid_log_rows(log), exercise_id).sort_values(["Date", "_Row"]).copy()
     if records.empty:
         st.info("No valid records for this exercise.")
         return
@@ -249,6 +258,8 @@ def history_columns(units, set_types):
     return {
         "Delete": st.column_config.CheckboxColumn("❌", width="small", default=False),
         "ID": None, "ExerciseID": None, "Date": None, "Weight (kg)": None,
+        "Original Date": None, "Original Weight": None, "Original Reps": None,
+        "Data Issues": None, "_Row": None,
         "Exercise": st.column_config.TextColumn("Exercise", disabled=True),
         "Target": st.column_config.TextColumn("Target", disabled=True),
         "Weight": st.column_config.NumberColumn("Weight", format="%.1f"),
@@ -265,6 +276,25 @@ def render_history(log, units, set_types, spreadsheet):
     st.markdown("### History")
     if log.empty:
         st.info("No data available.")
+        return
+    with st.expander("Record IDs", expanded=False):
+        legacy_count = int((~log["ID"].map(is_uuid)).sum())
+        if legacy_count:
+            st.caption(
+                f"{legacy_count} record ID(s) can be converted to UUIDs. "
+                "Existing UUIDs, exercise IDs and workout values will be kept. "
+                "Reload other open views after converting."
+            )
+            if st.button("Convert existing record IDs to UUIDs", key="migrate_record_ids"):
+                save_changes(
+                    lambda: sheets.migrate_record_ids(spreadsheet),
+                    "Record IDs unified. Reload other open views before editing.",
+                )
+        else:
+            st.caption("All record IDs use UUIDs.")
+    log = valid_log_rows(log)
+    if log.empty:
+        st.info("No valid records to edit. Check the records needing correction above.")
         return
     months = log["Date"].dt.strftime("%Y/%m")
     available_months = sorted(months.dropna().unique(), reverse=True)
@@ -299,25 +329,34 @@ def render_history(log, units, set_types, spreadsheet):
             return
         st.caption("Edit directly in the table, check 'Delete' to remove records, then save.")
         edited_frames = []
+        original_frames = []
         for date in dates:
             st.markdown(f"#### 📅 {date:%Y/%m/%d}")
-            daily_log = monthly_log[monthly_log["Date"].dt.date == date].sort_values("ID").copy()
-            daily_log.insert(0, "Delete", False)
+            snapshot_key = f"history_original_{date}"
+            if snapshot_key not in st.session_state:
+                daily_log = monthly_log[monthly_log["Date"].dt.date == date].sort_values("_Row").copy()
+                daily_log.insert(0, "Delete", False)
+                st.session_state[snapshot_key] = daily_log
+            daily_log = st.session_state[snapshot_key]
+            original_frames.append(daily_log)
             edited_frames.append(st.data_editor(
                 daily_log, hide_index=True, column_config=history_columns(units, set_types),
                 disabled=["Exercise", "Target", "ID", "ExerciseID", "Date",
-                          "Estimated 1RM (kg)", "Weight (kg)"],
+                          "Estimated 1RM (kg)", "Weight (kg)", "Original Date",
+                          "Original Weight", "Original Reps", "Data Issues", "_Row"],
                 key=f"editor_{date}",
             ))
             st.divider()
         if st.button("💾 Apply Changes (Save Edits & Deletes)", type="primary"):
-            edited = pd.concat(edited_frames)
-            deleted_ids = edited.loc[edited["Delete"], "ID"].tolist()
-            kept = edited.loc[~edited["Delete"]].set_index("ID")
-            edits = kept[list(EDITABLE_LOG_FIELDS)].to_dict("index")
+            originals = pd.concat(original_frames).to_dict("records")
+            edited = pd.concat(edited_frames).to_dict("records")
+            edits, deleted_ids = collect_history_changes(originals, edited)
+            if not edits and not deleted_ids:
+                st.info("No changes to save.")
+                return
             save_changes(
-                lambda: sheets.save_history(spreadsheet, edits, deleted_ids),
-                f"Changes applied! (Deleted {len(deleted_ids)}, Checked {len(edits)} for updates).",
+                lambda: sheets.save_history(spreadsheet, edits, deleted_ids, originals),
+                f"Changes applied! (Deleted {len(deleted_ids)}, Updated {len(edits)} records).",
             )
 
 
@@ -426,6 +465,10 @@ def main():
     with reload_col:
         st.markdown("<div style='margin-top: 25px;'></div>", unsafe_allow_html=True)
         if st.button("Reload", use_container_width=True):
+            reset_history()
+            for key in list(st.session_state):
+                if key.startswith(("weight_", "unit_", "reps_")):
+                    st.session_state.pop(key)
             st.cache_data.clear()
             st.rerun()
     st.markdown(MOBILE_FORM_CSS, unsafe_allow_html=True)
@@ -454,6 +497,17 @@ def main():
         unknown = log["Exercise"].str.startswith("Unknown ExerciseID: ").sum()
         if unknown:
             st.warning(f"{unknown} log(s) reference unknown exercise IDs. Check History & Edit.")
+        problems = log[log["Data Issues"].map(len).gt(0)]
+        if not problems.empty:
+            st.warning(f"{len(problems)} record(s) need correction. These records are excluded from analysis and editable history.")
+            with st.expander("Records needing correction", expanded=True):
+                display = problems[["ID", "ExerciseID", "Exercise", "Original Date",
+                                    "Original Weight", "Original Reps", "Data Issues"]].copy()
+                display["Sheet Row"] = problems["_Row"] + 2
+                display["Data Issues"] = display["Data Issues"].map(", ".join)
+                # Text keeps malformed source values visible in a mixed-type table.
+                st.dataframe(display.astype(str), hide_index=True)
+                st.caption("Correct the listed values in Training Log, then click Reload. Original values are preserved.")
     log_tab, history_tab, templates_tab = st.tabs(["Log & Analysis", "History & Edit", "Templates"])
     with log_tab:
         exercise_id = render_log(log, exercises, templates, units, set_types, spreadsheet)
