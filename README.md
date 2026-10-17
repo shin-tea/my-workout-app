@@ -2,6 +2,19 @@
 
 Streamlit workout tracker backed by Google Sheets. Run with `streamlit run main.py`.
 
+## Code layout
+
+- `main.py`: screen rendering, input fields and save feedback. `main()` loads the
+  data once, then calls the Log & Analysis, History & Edit and Templates screens.
+- `workout_sheets.py`: Google Sheets connection, reads and writes. Existing records
+  are updated by ID using current sheet row positions; sheets are never cleared.
+- `workout_data.py`: ID matching, shared analysis columns, template IDs and sheet
+  request construction. No Streamlit or Google connection is needed here.
+- `tests/`: offline tests for data handling and sheet writes using in-memory sheets.
+
+Template creation and editing share one form. All screens use the same prepared
+log data, and exercise selectors store IDs while displaying names from the master.
+
 ## Exercise names are derived from ExerciseID
 
 `Exercise Master.exercise_id` is the source of truth. The app resolves log names

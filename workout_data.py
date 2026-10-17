@@ -1,4 +1,4 @@
-"""Exercise identity and sheet updates, independent of the Streamlit UI."""
+"""Workout calculations and sheet request builders, without UI or network access."""
 
 from numbers import Real
 
@@ -34,6 +34,40 @@ def resolve_exercise_names(log, master):
 
 def exercise_records(log, exercise_id):
     return log[log["ExerciseID"].map(normalize_id).eq(normalize_id(exercise_id))]
+
+
+def prepare_log(log, master):
+    """Prepare a single consistent dataframe for all three screens."""
+    result = resolve_exercise_names(log, master)
+    if result.empty:
+        return result
+    result["ID"] = pd.to_numeric(result["ID"], errors="coerce").fillna(0).astype(int)
+    result["Date"] = pd.to_datetime(result["Date"], errors="coerce")
+    for field in ("Weight", "Reps"):
+        result[field] = pd.to_numeric(result[field], errors="coerce").fillna(0)
+    is_lbs = result["Unit"].astype(str).str.lower().eq("lbs")
+    result["Weight (kg)"] = result["Weight"].where(~is_lbs, result["Weight"] * 0.453592)
+    result["Estimated 1RM (kg)"] = result["Weight (kg)"] * (1 + result["Reps"] / 30)
+    return result
+
+
+def template_exercise_ids(value):
+    if pd.isna(value):
+        return []
+    return [normalize_id(part) for part in str(value).replace(",", "|").split("|") if part.strip()]
+
+
+def template_exercises(value, exercises):
+    """Preserve template order and skip IDs removed from the master."""
+    return [key for key in template_exercise_ids(value) if key in exercises]
+
+
+def next_template_id(existing_ids):
+    numbers = [
+        int(value[3:]) for value in map(str, existing_ids)
+        if value.startswith("TMP") and value[3:].isdigit()
+    ]
+    return f"TMP{max(numbers, default=0) + 1:03d}"
 
 
 def column_letter(number):
@@ -98,9 +132,15 @@ def history_update_requests(sheet_id, headers, current_rows, edits, deleted_ids)
                 "rows": [{"values": [{"userEnteredValue": entered_value}]}],
                 "fields": "userEnteredValue",
             }})
-    for row_index in reversed(delete_indexes):
-        requests.append({"deleteDimension": {"range": {
+    return requests + delete_row_requests(sheet_id, delete_indexes)
+
+
+def delete_row_requests(sheet_id, row_indexes):
+    """Delete zero-based sheet rows bottom-up so earlier indexes stay valid."""
+    return [
+        {"deleteDimension": {"range": {
             "sheetId": sheet_id, "dimension": "ROWS",
             "startIndex": row_index, "endIndex": row_index + 1,
-        }}})
-    return requests
+        }}}
+        for row_index in sorted(set(row_indexes), reverse=True)
+    ]

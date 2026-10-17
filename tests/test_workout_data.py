@@ -4,7 +4,7 @@ import pandas as pd
 
 from workout_data import (
     exercise_name_formula, exercise_records, history_update_requests,
-    resolve_exercise_names,
+    next_template_id, prepare_log, resolve_exercise_names, template_exercises,
 )
 
 
@@ -80,6 +80,34 @@ class HistoryUpdateTests(unittest.TestCase):
     def test_unchanged_values_do_not_overwrite_cells(self):
         row = {'ID': 1, 'Weight': 30, 'Unit': 'kg', 'Reps': 10, 'RPE': '', 'Set Type': '', 'Memo': ''}
         self.assertEqual(history_update_requests(1, HEADERS, [row], {1: dict(row)}, []), [])
+
+
+class DataPreparationTests(unittest.TestCase):
+    def test_analysis_columns_are_shared_without_changing_source_rows(self):
+        master = pd.DataFrame([{'exercise_id': 27, 'exercise_name': 'Seated Row'}])
+        log = pd.DataFrame([{
+            'ID': '1', 'Date': '2026/01/01', 'ExerciseID': '27.0',
+            'Exercise': 'Old name', 'Weight': '100', 'Unit': 'lbs', 'Reps': '10',
+        }])
+        prepared = prepare_log(log, master)
+        self.assertEqual(prepared.iloc[0]['Exercise'], 'Seated Row')
+        self.assertAlmostEqual(prepared.iloc[0]['Weight (kg)'], 45.3592)
+        self.assertAlmostEqual(prepared.iloc[0]['Estimated 1RM (kg)'], 45.3592 * 4 / 3)
+        self.assertEqual(prepared.iloc[0]['Date'], pd.Timestamp('2026-01-01'))
+        self.assertEqual(log.iloc[0]['Weight'], '100')
+        self.assertNotIn('Estimated 1RM (kg)', log)
+
+    def test_template_ids_preserve_order_and_support_old_separator(self):
+        exercises = {'27': {}, '52': {}}
+        for value in ['52|27.0|999', ' 52 ,27.0,999']:
+            with self.subTest(value=value):
+                self.assertEqual(template_exercises(value, exercises), ['52', '27'])
+        self.assertEqual(template_exercises(None, exercises), [])
+        self.assertEqual(template_exercises('', exercises), [])
+
+    def test_template_number_does_not_depend_on_sheet_order(self):
+        self.assertEqual(next_template_id([]), 'TMP001')
+        self.assertEqual(next_template_id(['TMP009', 'TMP002', 'other']), 'TMP010')
 
 
 if __name__ == '__main__':
