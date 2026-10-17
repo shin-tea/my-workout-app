@@ -135,50 +135,6 @@ class PersistenceTests(unittest.TestCase):
         training_log.get_all_records.assert_not_called()
         sheets_by_title[1].get_all_records.assert_called_once_with()
 
-    def test_id_migration_updates_only_legacy_ids_in_actual_id_column(self):
-        preserved = '8f923c1e-70be-40ca-aa43-d7c0f9b8c86e'
-        headers = ['Date', 'Weight', 'ID', 'ExerciseID']
-        log = FakeSheet(sheets.TRAINING_LOG, headers, [
-            {'Date': '2026/01/01', 'Weight': 20, 'ID': 1, 'ExerciseID': 27},
-            {'Date': '2026/01/02', 'Weight': 30, 'ID': preserved, 'ExerciseID': 27},
-            {'Date': '2026/01/03', 'Weight': 40, 'ID': '2.0', 'ExerciseID': 27},
-        ])
-        spreadsheet = FakeSpreadsheet(log)
-
-        self.assertEqual(sheets.migrate_record_ids(spreadsheet), 2)
-        self.assertEqual(len(log.updates), 1)
-        updates, mode = log.updates[0]
-        self.assertEqual(mode, 'RAW')
-        self.assertEqual([update['range'] for update in updates], ['C2', 'C4'])
-        self.assertEqual([uuid.UUID(update['values'][0][0]).version for update in updates], [4, 4])
-        self.assertEqual(log.rows[1]['ID'], preserved)
-        self.assertEqual(log.rows[0]['Weight'], 20)
-        self.assertEqual(log.rows[2]['Weight'], 40)
-
-    def test_id_migration_noops_when_every_record_id_is_uuid(self):
-        log = FakeSheet(sheets.TRAINING_LOG, ['ID', 'Memo'], [
-            {'ID': '8f923c1e-70be-40ca-aa43-d7c0f9b8c86e', 'Memo': 'preserve'},
-        ])
-        self.assertEqual(sheets.migrate_record_ids(FakeSpreadsheet(log)), 0)
-        self.assertEqual(log.updates, [])
-
-    def test_id_migration_noops_when_training_log_has_no_records(self):
-        log = FakeSheet(sheets.TRAINING_LOG, ['ID', 'Memo'])
-        self.assertEqual(sheets.migrate_record_ids(FakeSpreadsheet(log)), 0)
-        self.assertEqual(log.updates, [])
-
-    def test_id_migration_rejects_blank_or_duplicate_ids_without_writes(self):
-        invalid_rows = [
-            [{'ID': '', 'Memo': 'blank'}],
-            [{'ID': 'duplicate', 'Memo': 'one'}, {'ID': 'duplicate', 'Memo': 'two'}],
-        ]
-        for rows in invalid_rows:
-            with self.subTest(rows=rows):
-                log = FakeSheet(sheets.TRAINING_LOG, ['ID', 'Memo'], rows)
-                with self.assertRaises(ValueError):
-                    sheets.migrate_record_ids(FakeSpreadsheet(log))
-                self.assertEqual(log.updates, [])
-
     def test_new_log_stores_lookup_formula_in_actual_exercise_column(self):
         log = FakeSheet(sheets.TRAINING_LOG, ['ID', 'ExerciseID', 'Exercise', 'Weight'])
         master = FakeSheet(sheets.EXERCISE_MASTER, ['exercise_id', 'exercise_name'])

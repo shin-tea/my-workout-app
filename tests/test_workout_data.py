@@ -3,9 +3,10 @@ import unittest
 import pandas as pd
 
 from workout_data import (
-    collect_history_changes, exercise_name_formula, exercise_records,
-    history_update_requests, is_uuid, latest_exercise_record, next_template_id,
-    prepare_log, resolve_exercise_names, template_exercises,
+    analysis_records, collect_history_changes, daily_progress,
+    exercise_name_formula, exercise_records, history_update_requests,
+    latest_exercise_record, next_template_id, prepare_log, resolve_exercise_names,
+    set_comparison, template_exercises,
 )
 
 
@@ -60,14 +61,6 @@ class ExerciseIdentityTests(unittest.TestCase):
         self.assertIn('INDEX($A:$A,ROW())', reordered)
         self.assertIn("INDEX('Exercise Master'!$A:$A", reordered)
         self.assertIn("'Exercise Master'!$B:$B,0)", reordered)
-
-    def test_uuid_validation_accepts_uuid_and_rejects_legacy_or_malformed_ids(self):
-        self.assertTrue(is_uuid('8f923c1e-70be-40ca-aa43-d7c0f9b8c86e'))
-        self.assertFalse(is_uuid(1))
-        self.assertFalse(is_uuid('2.0'))
-        self.assertFalse(is_uuid('not-a-uuid'))
-        self.assertFalse(is_uuid(''))
-
 
 class HistoryUpdateTests(unittest.TestCase):
     def test_updates_preserve_formulas_and_delete_bottom_up(self):
@@ -270,6 +263,80 @@ class DataPreparationTests(unittest.TestCase):
     def test_template_number_does_not_depend_on_sheet_order(self):
         self.assertEqual(next_template_id([]), 'TMP001')
         self.assertEqual(next_template_id(['TMP009', 'TMP002', 'other']), 'TMP010')
+
+
+class ScreenDataTests(unittest.TestCase):
+    def setUp(self):
+        self.master = pd.DataFrame([{'exercise_id': 27, 'exercise_name': 'Row'}])
+
+    def test_set_comparison_uses_prior_latest_day_and_same_day_input_order(self):
+        log = prepare_log(pd.DataFrame([
+            {'ID': 'old', 'Date': '2026/01/01', 'ExerciseID': 27, 'Weight': 90, 'Unit': 'kg',
+             'Reps': 5, 'Set Type': 'Main'},
+            {'ID': 'prev-1', 'Date': '2026/01/08', 'ExerciseID': 27, 'Weight': 55, 'Unit': 'kg',
+             'Reps': 10, 'Set Type': 'Main'},
+            {'ID': 'prev-2', 'Date': '2026/01/08', 'ExerciseID': 27, 'Weight': 60, 'Unit': 'kg',
+             'Reps': 10, 'Set Type': 'Main'},
+            {'ID': 'today-1', 'Date': '2026/01/10', 'ExerciseID': 27, 'Weight': 62.5, 'Unit': 'kg',
+             'Reps': 8, 'Set Type': 'Main'},
+            {'ID': 'today-2', 'Date': '2026/01/10', 'ExerciseID': 27, 'Weight': 65, 'Unit': 'kg',
+             'Reps': 7, 'Set Type': 'Main'},
+        ]), self.master)
+
+        compared = set_comparison(log, 27, '2026-01-10')
+        self.assertEqual(list(compared.columns), ['Set', 'Previous', 'Today'])
+        self.assertEqual(compared['Previous'].tolist(), ['55.0 kg × 10', '60.0 kg × 10'])
+        self.assertEqual(compared['Today'].tolist(), ['62.5 kg × 8', '65.0 kg × 7'])
+        self.assertEqual(compared['Set'].tolist(), [1, 2])
+
+    def test_set_comparison_uses_dash_for_missing_cell_and_empty_if_no_records(self):
+        log = prepare_log(pd.DataFrame([
+            {'ID': 'previous', 'Date': '2026/01/08', 'ExerciseID': 27, 'Weight': 55, 'Unit': 'kg',
+             'Reps': 10, 'Set Type': 'Main'},
+        ]), self.master)
+        compared = set_comparison(log, 27, '2026-01-10')
+        self.assertEqual(compared['Previous'].tolist(), ['55.0 kg × 10'])
+        self.assertEqual(compared['Today'].tolist(), ['—'])
+        self.assertEqual(set_comparison(log, 999, '2026-01-10').empty, True)
+        self.assertEqual(set_comparison(log, 27, '2025-01-01').empty, True)
+
+    def test_analysis_records_filters_invalids_period_and_optional_warmups(self):
+        log = prepare_log(pd.DataFrame([
+            {'ID': 'old', 'Date': '2025/10/01', 'ExerciseID': 27, 'Weight': 50, 'Unit': 'kg',
+             'Reps': 8, 'Set Type': 'Main'},
+            {'ID': 'warmup', 'Date': '2026/01/01', 'ExerciseID': 27, 'Weight': 20, 'Unit': 'kg',
+             'Reps': 10, 'Set Type': 'Up'},
+            {'ID': 'main', 'Date': '2026/01/01', 'ExerciseID': 27, 'Weight': 60, 'Unit': 'kg',
+             'Reps': 8, 'Set Type': ''},
+            {'ID': 'invalid', 'Date': '2026/01/02', 'ExerciseID': 27, 'Weight': 'bad', 'Unit': 'kg',
+             'Reps': 8, 'Set Type': 'Main'},
+            {'ID': 'recent', 'Date': '2026/04/01', 'ExerciseID': 27, 'Weight': 65, 'Unit': 'kg',
+             'Reps': 8, 'Set Type': 'Main'},
+        ]), self.master)
+
+        recent = analysis_records(log, 27, months=3, include_warmups=False)
+        self.assertEqual(recent['ID'].tolist(), ['main', 'recent'])
+        all_rows = analysis_records(log, 27, months=None, include_warmups=True)
+        self.assertEqual(all_rows['ID'].tolist(), ['old', 'warmup', 'main', 'recent'])
+        self.assertEqual(all_rows['_Row'].tolist(), [0, 1, 2, 4])
+
+    def test_daily_progress_aggregates_max_metrics_in_date_order(self):
+        log = prepare_log(pd.DataFrame([
+            {'ID': 'b2', 'Date': '2026/01/02', 'ExerciseID': 27, 'Weight': 60, 'Unit': 'kg', 'Reps': 6},
+            {'ID': 'a1', 'Date': '2026/01/01', 'ExerciseID': 27, 'Weight': 50, 'Unit': 'kg', 'Reps': 8},
+            {'ID': 'a2', 'Date': '2026/01/01', 'ExerciseID': 27, 'Weight': 55, 'Unit': 'kg', 'Reps': 7},
+        ]), self.master)
+        expected_dates = [pd.Timestamp('2026-01-01'), pd.Timestamp('2026-01-02')]
+        for column, values in (
+            ('Estimated 1RM (kg)', [55 * (1 + 7 / 30), 60 * (1 + 6 / 30)]),
+            ('Reps', [8, 6]),
+            ('Weight (kg)', [55, 60]),
+        ):
+            with self.subTest(column=column):
+                result = daily_progress(log, column=column, aggregation='max')
+                self.assertEqual(result['Date'].tolist(), expected_dates)
+                self.assertEqual(result[column].tolist(), values)
+        self.assertTrue(daily_progress(log.iloc[0:0], column='Reps').empty)
 
 
 if __name__ == '__main__':

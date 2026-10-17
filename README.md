@@ -5,7 +5,7 @@ Streamlit workout tracker backed by Google Sheets. Run with `streamlit run main.
 ## Code layout
 
 - `main.py`: screen rendering, input fields and save feedback. `main()` loads the
-  data once, then calls the Log & Analysis, History & Edit and Templates screens.
+  data once, then renders Log, Analysis, History & Edit and Templates.
 - `workout_sheets.py`: Google Sheets connection, reads and writes. Existing records
   are updated by ID using current sheet row positions; sheets are never cleared.
 - `workout_data.py`: ID matching, shared analysis columns, template IDs and sheet
@@ -47,13 +47,6 @@ New workout records receive a UUID at save time. Existing numeric record IDs and
 all exercise IDs remain valid; existing rows do not need migration. UUIDs identify
 records and are not used to infer when a set was performed.
 
-To use UUIDs consistently, open **History & Edit → Record IDs → Convert existing
-record IDs to UUIDs** once. This reads the current Training Log and replaces only
-non-UUID ID cells in one batch. Existing UUIDs, ExerciseID, lookup formulas and all
-workout values stay unchanged. Blank or duplicate IDs stop the conversion. Once
-all IDs are UUIDs, the action disappears. Reload other open app views afterwards;
-edits based on the old IDs are rejected until reloaded.
-
 History keeps the original rows shown in each editor and sends only fields that
 the user actually changed. Before writing, the app reads the current sheet and
 checks those fields against the originals. Conflicting edits, missing records and
@@ -93,3 +86,20 @@ read, without re-fetching master headers or all reference sheets. Read operation
 also reuse headers returned with records rather than requesting them separately.
 If you manually reorder sheet columns or replace a worksheet, click Reload before
 entering records so both headers and worksheet metadata are refreshed.
+
+## Recording and analysis
+
+Log shows the previous workout and the selected day's sets side by side in input
+order. Backdated entries compare against the last workout before that date. Weight
+and repetitions are the main inputs; the weight step is 1 in both Log and History.
+Unit, RPE, set type and memo are under More options. Saving reads back the log before
+showing success and updating the comparison table.
+
+Analysis has its own exercise selector, defaulting initially to the logging
+exercise. Choose daily progress, maximum weight or all sets, and a 3-month,
+6-month or all-time range ending on the latest recorded date. Unclassified sets
+are included even when warm-ups (Up) are excluded. Daily progress uses estimated
+1RM for loaded exercises, repetitions for bodyweight exercises and minimum
+absolute assistance weight for assisted exercises, identified by master names
+and equipment. The all-sets view also provides a table so overlapping points do
+not hide individual records. Dates and record counts are shown with each chart.

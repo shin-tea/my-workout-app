@@ -2,17 +2,8 @@
 
 import math
 from numbers import Real
-from uuid import UUID
 
 import pandas as pd
-
-
-def is_uuid(value):
-    try:
-        UUID(str(value))
-        return True
-    except (ValueError, TypeError, AttributeError):
-        return False
 
 
 def normalize_id(value):
@@ -90,6 +81,48 @@ def latest_exercise_record(log, exercise_id):
     if records.empty:
         return {}
     return records.sort_values(["Date", "_Row"], kind="stable").iloc[-1].to_dict()
+
+
+def set_comparison(log, exercise_id, date):
+    columns = ["Set", "Previous", "Today"]
+    if log.empty:
+        return pd.DataFrame(columns=columns)
+    records = exercise_records(valid_log_rows(log), exercise_id).sort_values("_Row")
+    days = records["Date"].dt.normalize()
+    selected_day = pd.Timestamp(date).normalize()
+    previous_day = days[days < selected_day].max()
+    def labels(mask):
+        return [
+            f"{row['Weight']:.1f} {row['Unit']} × {int(row['Reps'])}"
+            for row in records[mask].to_dict("records")
+        ]
+    previous, today = labels(days == previous_day), labels(days == selected_day)
+    count = max(len(previous), len(today))
+    comparison = pd.DataFrame({
+        "Set": range(1, count + 1),
+        "Previous": previous + ["—"] * (count - len(previous)),
+        "Today": today + ["—"] * (count - len(today)),
+    })
+    comparison.attrs["previous_date"] = previous_day.strftime("%Y/%m/%d") if pd.notna(previous_day) else None
+    return comparison
+
+
+def analysis_records(log, exercise_id, months=None, include_warmups=True):
+    if log.empty:
+        return log.copy()
+    records = exercise_records(valid_log_rows(log), exercise_id).sort_values(["Date", "_Row"])
+    if months and not records.empty:
+        cutoff = records["Date"].max() - pd.DateOffset(months=months)
+        records = records[records["Date"] >= cutoff]
+    if not include_warmups and "Set Type" in records:
+        records = records[records["Set Type"].fillna("").ne("Up")]
+    return records.copy()
+
+
+def daily_progress(records, column="Estimated 1RM (kg)", aggregation="max"):
+    if records.empty:
+        return pd.DataFrame(columns=["Date", column])
+    return records.groupby(records["Date"].dt.normalize())[column].agg(aggregation).reset_index()
 
 
 def template_exercise_ids(value):

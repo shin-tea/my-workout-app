@@ -8,12 +8,14 @@ import streamlit as st
 
 import workout_sheets as sheets
 from workout_data import (
+    EDITABLE_LOG_FIELDS,
+    analysis_records,
     collect_history_changes,
-    exercise_records,
+    daily_progress,
     latest_exercise_record,
-    is_uuid,
     normalize_id,
     prepare_log,
+    set_comparison,
     template_exercises,
     valid_log_rows,
 )
@@ -66,7 +68,8 @@ def load_data(spreadsheet):
 def save_changes(action, message, reset_keys=(), refresh="log"):
     """Share error handling and show success after reloading fresh sheet data."""
     try:
-        action()
+        with st.spinner("Saving…"):
+            action()
     except Exception as error:
         st.error(f"Save failed: {error}")
         return
@@ -144,38 +147,53 @@ def render_log(log, exercises, templates, units, set_types, spreadsheet, master_
     if exercise_id is None:
         return None
     exercise = exercises[exercise_id]
-    previous = latest_exercise_record(log, exercise_id)
+    date = st.date_input("Date", datetime.date.today(), format="YYYY/MM/DD", key="log_date")
+    dated_log = log[log["Date"].dt.date <= date] if not log.empty else log
+    previous = latest_exercise_record(dated_log, exercise_id)
     default_unit = previous.get("Unit", "kg")
     unit_index = units.index(default_unit) if default_unit in units else 0
 
+    comparison = set_comparison(log, exercise_id, date)
+    st.markdown("#### Previous workout / Today" if date == datetime.date.today() else "#### Previous workout / Selected day")
+    if comparison.empty:
+        st.caption("No sets yet. Add your first set below.")
+    else:
+        previous_date = comparison.attrs["previous_date"]
+        previous_label = f"Previous · {previous_date}" if previous_date else "Previous"
+        day_label = "Today" if date == datetime.date.today() else f"{date:%Y/%m/%d}"
+        st.dataframe(
+            comparison, hide_index=True, width="stretch",
+            column_config={"Previous": previous_label, "Today": day_label},
+        )
+
     with st.form("log_form"):
-        date = st.date_input("Date", datetime.date.today(), format="YYYY/MM/DD")
-        weight_col, unit_col = st.columns([2, 1])
+        weight_col, reps_col = st.columns(2)
         with weight_col:
             weight = st.number_input(
-                "Weight", min_value=0.0, step=2.5, format="%.1f",
+                "Weight", min_value=0.0, step=1.0, format="%.1f",
                 value=float(previous.get("Weight", 0)), key=f"weight_{exercise_id}",
             )
-        with unit_col:
-            unit = st.selectbox("Unit", units, index=unit_index, key=f"unit_{exercise_id}")
-        reps_col, rpe_col, type_col = st.columns([1, 1, 1.5])
         with reps_col:
             reps = st.number_input(
                 "Reps", min_value=0, step=1, value=int(previous.get("Reps", 10)),
                 key=f"reps_{exercise_id}",
             )
-        with rpe_col:
+        with st.expander("More options: unit, RPE, set type and memo"):
+            unit_col, type_col = st.columns(2)
+            with unit_col:
+                unit = st.selectbox("Unit", units, index=unit_index, key=f"unit_{exercise_id}")
+            with type_col:
+                set_type = st.selectbox(
+                    "Set Type", set_types, index=set_types.index("Main") if "Main" in set_types else 0,
+                    key=f"set_type_{exercise_id}",
+                )
             rpe = st.number_input(
                 "RPE", min_value=1.0, max_value=10.0, step=0.5, value=None,
                 key=f"rpe_{exercise_id}",
             )
-        with type_col:
-            set_type = st.selectbox(
-                "Set Type", set_types, index=set_types.index("Main") if "Main" in set_types else 0,
-                key=f"set_type_{exercise_id}",
-            )
-        memo = st.text_input("Memo", key=f"memo_{exercise_id}")
-        submitted = st.form_submit_button("Add Log", type="primary")
+            memo = st.text_input("Memo", key=f"memo_{exercise_id}")
+        st.caption(f"Weight unit: {default_unit if default_unit in units else units[0]} · change in More options")
+        submitted = st.form_submit_button("Add Log", type="primary", use_container_width=True)
 
     if submitted:
         record = {
@@ -193,62 +211,77 @@ def render_log(log, exercises, templates, units, set_types, spreadsheet, master_
     return exercise_id
 
 
-def render_analysis(log, exercise_id, exercises, spreadsheet):
-    st.divider()
-    st.markdown("### Analysis")
-    if log.empty:
-        st.info("No training data available yet.")
-        return
-    if exercise_id is None:
-        return
-    records = exercise_records(valid_log_rows(log), exercise_id).sort_values(["Date", "_Row"]).copy()
-    if records.empty:
-        st.info("No valid records for this exercise.")
-        return
-    exercise = exercises[exercise_id]
-    records["Set Order"] = records.groupby("Date").cumcount() + 1
+def all_sets_chart(records, show_estimate=True):
+    plot = records.copy()
+    plot["Set Type"] = plot["Set Type"].fillna("").replace("", "Unclassified")
     figure = px.scatter(
-        records, x="Date", y="Weight (kg)", size="Reps", color="Estimated 1RM (kg)",
-        title=f"{exercise['exercise_name']} - Performance Analysis",
-        custom_data=["Set Order", "Reps", "Weight (kg)", "RPE", "Memo", "Estimated 1RM (kg)"],
+        plot, x="Date", y="Weight (kg)", size="Reps", color="Set Type",
+        hover_data={"Date": "|%Y/%m/%d", "Weight (kg)": ":.1f", "Set Order": True,
+                    "RPE": True, "Memo": True, "Estimated 1RM (kg)": show_estimate},
     )
-    figure.update_traces(
-        marker=dict(line=dict(width=1, color="DarkSlateGrey"), sizeref=0.5, sizemin=8),
-        hovertemplate=(
-            "<b>%{x|%Y/%m/%d}</b><br>"
-            "Weight:&nbsp;%{customdata[2]:.1f} kg<br>"
-            "Reps:&nbsp;&nbsp;&nbsp;%{customdata[1]}<br>"
-            "Set #:&nbsp;&nbsp;%{customdata[0]}<br>"
-            "RPE:&nbsp;&nbsp;&nbsp;&nbsp;%{customdata[3]}<br>"
-            "1RM:&nbsp;&nbsp;&nbsp;&nbsp;%{customdata[5]:.1f} kg<br>"
-            "Memo:&nbsp;&nbsp;&nbsp;%{customdata[4]}<extra></extra>"
-        ),
-    )
-    figure.update_layout(hovermode="closest", showlegend=False, coloraxis_showscale=False)
-    st.plotly_chart(figure, width="stretch")
-    best_col, weight_col, count_col = st.columns(3)
-    best_col.metric("Personal Best (1RM)", f"{records['Estimated 1RM (kg)'].max():.1f} kg")
-    weight_col.metric("Max Weight Lifted", f"{records['Weight (kg)'].max():.1f} kg")
-    count_col.metric("Total Sets Logged", len(records))
+    figure.update_traces(marker=dict(line=dict(width=1, color="DarkSlateGrey"), sizeref=0.5, sizemin=8))
+    figure.update_layout(legend=dict(orientation="h", title=None))
+    return figure
 
-    st.markdown("#### Recent Sets")
-    recent_dates = sorted(records["Date"].dt.date.unique(), reverse=True)[:3]
-    for date in recent_dates:
-        st.markdown(f"**📅 {date:%Y/%m/%d}**")
-        daily_records = records[records["Date"].dt.date == date]
-        for number, row in enumerate(daily_records.to_dict("records"), 1):
-            estimated = row["Estimated 1RM (kg)"]
-            estimate_text = f" (1RM: {estimated:.1f} kg)" if estimated > 0 else ""
-            st.markdown(
-                f"&nbsp;&nbsp;&nbsp;&nbsp;**{number}.** "
-                f"{row['Weight']:.1f} {row['Unit']} x {int(row['Reps'])}{estimate_text}"
-            )
-    render_notes(exercise_id, exercise, spreadsheet)
+
+def render_analysis(log, exercises, spreadsheet, default_exercise=None):
+    st.markdown("### Analysis")
+    options = list(exercises)
+    exercise_id = st.selectbox(
+        "Exercise", options, index=options.index(default_exercise) if default_exercise in options else 0,
+        format_func=lambda key: exercise_label(exercises, key), key="analysis_exercise",
+    )
+    period_col, view_col = st.columns(2)
+    with period_col:
+        months = st.selectbox("Period", [3, 6, None], format_func=lambda value: f"Last {value} months" if value else "All time")
+    exercise = exercises[exercise_id]
+    name = exercise["exercise_name"].lower()
+    assisted = "assisted" in name
+    bodyweight = "bodyweight" in name or str(exercise.get("equipment_type", "")).lower() == "bodyweight"
+    progress_column, progress_label = "Estimated 1RM (kg)", "Estimated 1RM (kg)"
+    if assisted:
+        progress_column, progress_label = "Weight (kg)", "Least assistance (kg)"
+    elif bodyweight:
+        progress_column, progress_label = "Reps", "Max reps"
+    with view_col:
+        view = st.selectbox("Chart", [progress_label, "Max weight (kg)", "All sets"])
+    include_warmups = st.checkbox("Include warm-up sets", value=True)
+    records = analysis_records(log, exercise_id, months, include_warmups)
+    if records.empty:
+        st.info("No records in this period. Try All time or include warm-up sets.")
+        return
+    records["Set Order"] = records.groupby(records["Date"].dt.normalize()).cumcount() + 1
+    if assisted:
+        records["Weight (kg)"] = records["Weight (kg)"].abs()
+    if view == "All sets":
+        figure = all_sets_chart(records, show_estimate=not (assisted or bodyweight))
+    else:
+        column = "Weight (kg)" if view == "Max weight (kg)" else progress_column
+        aggregation = "min" if assisted and view == progress_label else "max"
+        progress = daily_progress(records, column, aggregation)
+        figure = px.line(progress, x="Date", y=column, markers=True, labels={column: view})
+        figure.update_traces(hovertemplate="%{x|%Y/%m/%d}<br>%{y:.1f}<extra></extra>")
+    figure.update_layout(xaxis_title=None, margin=dict(l=10, r=10, t=20, b=10))
+    st.plotly_chart(figure, width="stretch")
+    start, end = records["Date"].min(), records["Date"].max()
+    st.caption(f"{start:%Y/%m/%d} – {end:%Y/%m/%d} · {len(records)} sets · Period ends on the latest recorded date")
+    if assisted or bodyweight:
+        st.caption("Progress uses repetitions for bodyweight exercises and assistance for assisted exercises; less assistance means less support.")
+    best_col, weight_col, count_col = st.columns(3)
+    best = records[progress_column].min() if assisted else records[progress_column].max()
+    best_col.metric(progress_label, f"{best:.1f}")
+    weight_col.metric("Max weight (kg)", f"{records['Weight (kg)'].max():.1f}")
+    count_col.metric("Sets in period", len(records))
+    if view == "All sets":
+        st.dataframe(
+            records[["Date", "Set Order", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"]],
+            hide_index=True, width="stretch",
+        )
+    with st.expander("Exercise notes"):
+        render_notes(exercise_id, exercise, spreadsheet)
 
 
 def render_notes(exercise_id, exercise, spreadsheet):
-    st.divider()
-    st.markdown("### Notes")
     muscle_col, equipment_col, category_col = st.columns(3)
     muscle_col.markdown(f"**Sub Muscle:** {exercise.get('sub_muscle_group', '-')}")
     equipment_col.markdown(f"**Equipment:** {exercise.get('equipment_type', '-')}")
@@ -275,7 +308,7 @@ def history_columns(units, set_types):
         "Data Issues": None, "_Row": None,
         "Exercise": st.column_config.TextColumn("Exercise", disabled=True),
         "Target": st.column_config.TextColumn("Target", disabled=True),
-        "Weight": st.column_config.NumberColumn("Weight", format="%.1f"),
+        "Weight": st.column_config.NumberColumn("Weight", format="%.1f", step=1),
         "Unit": st.column_config.SelectboxColumn("Unit", options=units),
         "Reps": st.column_config.NumberColumn("Reps", step=1),
         "RPE": st.column_config.NumberColumn("RPE", min_value=1.0, max_value=10.0, step=0.5),
@@ -290,30 +323,12 @@ def render_history(log, units, set_types, spreadsheet):
     if log.empty:
         st.info("No data available.")
         return
-    with st.expander("Record IDs", expanded=False):
-        legacy_count = int((~log["ID"].map(is_uuid)).sum())
-        if legacy_count:
-            st.caption(
-                f"{legacy_count} record ID(s) can be converted to UUIDs. "
-                "Existing UUIDs, exercise IDs and workout values will be kept. "
-                "Reload other open views after converting."
-            )
-            if st.button("Convert existing record IDs to UUIDs", key="migrate_record_ids"):
-                save_changes(
-                    lambda: sheets.migrate_record_ids(spreadsheet),
-                    "Record IDs unified. Reload other open views before editing.",
-                )
-        else:
-            st.caption("All record IDs use UUIDs.")
     log = valid_log_rows(log)
     if log.empty:
         st.info("No valid records to edit. Check the records needing correction above.")
         return
     months = log["Date"].dt.strftime("%Y/%m")
     available_months = sorted(months.dropna().unique(), reverse=True)
-    if not available_months:
-        st.warning("No valid dates. Check the Date column in Training Log.")
-        return
     current_month = datetime.date.today().strftime("%Y/%m")
     month = st.selectbox(
         "Select Month", available_months,
@@ -354,9 +369,7 @@ def render_history(log, units, set_types, spreadsheet):
             original_frames.append(daily_log)
             edited_frames.append(st.data_editor(
                 daily_log, hide_index=True, column_config=history_columns(units, set_types),
-                disabled=["Exercise", "Target", "ID", "ExerciseID", "Date",
-                          "Estimated 1RM (kg)", "Weight (kg)", "Original Date",
-                          "Original Weight", "Original Reps", "Data Issues", "_Row"],
+                disabled=[column for column in daily_log if column not in (*EDITABLE_LOG_FIELDS, "Delete")],
                 key=f"editor_{date}",
             ))
             st.divider()
@@ -525,12 +538,13 @@ def main():
                 # Text keeps malformed source values visible in a mixed-type table.
                 st.dataframe(display.astype(str), hide_index=True)
                 st.caption("Correct the listed values in Training Log, then click Reload. Original values are preserved.")
-    log_tab, history_tab, templates_tab = st.tabs(["Log & Analysis", "History & Edit", "Templates"])
+    log_tab, analysis_tab, history_tab, templates_tab = st.tabs(["Log", "Analysis", "History & Edit", "Templates"])
     with log_tab:
         exercise_id = render_log(
             log, exercises, templates, units, set_types, spreadsheet, master.attrs["sheet_headers"]
         )
-        render_analysis(log, exercise_id, exercises, spreadsheet)
+    with analysis_tab:
+        render_analysis(log, exercises, spreadsheet, exercise_id)
     with history_tab:
         render_history(log, units, set_types, spreadsheet)
     with templates_tab:

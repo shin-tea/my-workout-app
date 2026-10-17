@@ -11,8 +11,6 @@ from workout_data import (
     delete_row_requests,
     exercise_name_formula,
     history_update_requests,
-    index_log_rows,
-    is_uuid,
     next_template_id,
     normalize_id,
 )
@@ -106,24 +104,6 @@ def append_log(spreadsheet, record, log_headers=None, master_headers=None):
         master_headers = get_worksheet(spreadsheet, EXERCISE_MASTER).row_values(1)
     record = {**record, "ID": str(uuid4()), "Exercise": exercise_name_formula(log_headers, master_headers)}
     sheet.append_row([record.get(header, "") for header in log_headers], value_input_option="USER_ENTERED")
-
-
-@serialized_write
-def migrate_record_ids(spreadsheet):
-    """Convert legacy record IDs once; preserve UUIDs and every other cell."""
-    sheet = get_worksheet(spreadsheet, TRAINING_LOG)
-    headers, rows = read_records(sheet)
-    index_log_rows(rows)
-    if not rows:
-        return 0
-    column = column_letter(headers.index("ID") + 1)
-    updates = [
-        {"range": f"{column}{row_number}", "values": [[str(uuid4())]]}
-        for row_number, row in enumerate(rows, 2) if not is_uuid(row["ID"])
-    ]
-    if updates:
-        sheet.batch_update(updates, value_input_option="RAW")
-    return len(updates)
 
 
 @serialized_write
