@@ -5,6 +5,10 @@ import plotly.express as px
 import gspread
 import time
 from google.oauth2.service_account import Credentials
+from workout_data import (
+    normalize_id, resolve_exercise_names, exercise_records,
+    exercise_name_formula, history_update_requests,
+)
 
 # --- Constants & Config ---
 SHEET_TRAINING_LOG = "Training Log"
@@ -109,6 +113,17 @@ if df_master.empty or df_constants.empty:
 
 # --- Pre-processing Mappings ---
 try:
+    df_log = resolve_exercise_names(df_log, df_master)
+except ValueError as e:
+    st.error(str(e))
+    st.stop()
+
+if not df_log.empty:
+    unknown_names = df_log['Exercise'].astype(str).str.startswith('Unknown ExerciseID: ')
+    if unknown_names.any():
+        st.warning(f"{int(unknown_names.sum())} log(s) reference unknown exercise IDs. Check History & Edit.")
+
+try:
     set_types_raw = df_constants[df_constants['Category'] == 'SetType']['Value'].dropna().unique().tolist()
     set_types = [""] + set_types_raw
     units = df_constants[df_constants['Category'] == 'Unit']['Value'].dropna().unique().tolist()
@@ -137,13 +152,6 @@ if not df_templates.empty and 'template_name' in df_templates.columns:
                 'exercise_ids': ex_ids,
                 'memo': str(row.get('memo', ''))
             }
-
-def normalize_id(val):
-    if pd.isna(val): return ""
-    s = str(val).strip()
-    if s.endswith('.0'):
-        return s[:-2]
-    return s
 
 muscle_groups_input = sorted(df_master['target_muscle_group'].dropna().unique().tolist()) if 'target_muscle_group' in df_master.columns else []
 
@@ -223,7 +231,7 @@ with tab1:
     default_reps = 10
     default_unit_idx = 0 if 'kg' in units else 0
     if not df_log.empty and selected_exercise:
-        df_ex = df_log[df_log['Exercise'] == selected_exercise]
+        df_ex = exercise_records(df_log, exercise_map[selected_exercise]['exercise_id'])
         if not df_ex.empty:
             last_rec = df_ex.iloc[-1]
             try:
@@ -268,6 +276,7 @@ with tab1:
         unsafe_allow_html=True
     )
 
+    submitted = False
     if selected_exercise:
         with st.form("log_form"):
             date_val = st.date_input("Date", datetime.date.today(), format="YYYY/MM/DD")
@@ -321,7 +330,9 @@ with tab1:
             
             try:
                 ws_log = sh.worksheet(SHEET_TRAINING_LOG)
-                headers = df_log.columns.tolist() if not df_log.empty else ["ID", "Date", "ExerciseID", "Target", "Exercise", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"]
+                headers = ws_log.row_values(1)
+                master_headers = sh.worksheet(SHEET_EXERCISE_MASTER).row_values(1)
+                row['Exercise'] = exercise_name_formula(headers, master_headers)
                 rows_to_append = [[row.get(h, "") for h in headers]]
                 
                 ws_log.append_rows(rows_to_append, value_input_option='USER_ENTERED')
@@ -349,7 +360,7 @@ with tab1:
         df_log['Estimated 1RM (kg)'] = df_log['Weight (kg)'] * (1 + df_log['Reps'] / 30.0)
         
         if selected_exercise:
-            df_chart = df_log[df_log['Exercise'] == selected_exercise].copy()
+            df_chart = exercise_records(df_log, exercise_map[selected_exercise]['exercise_id']).copy()
             df_chart = df_chart.dropna(subset=['Date'])
             
             if df_chart.empty:
@@ -567,28 +578,12 @@ with tab2:
                                 try:
                                     ws_log_current = sh.worksheet(SHEET_TRAINING_LOG)
                                     current_data = ws_log_current.get_all_records()
-                                    df_current = pd.DataFrame(current_data)
-                                    
-                                    if 'ID' in df_current.columns:
-                                        df_current['ID'] = pd.to_numeric(df_current['ID'], errors='coerce').fillna(0).astype(int)
-                                        
-                                    df_remaining = df_current[~df_current['ID'].isin(ids_to_delete)].copy()
-                                    
-                                    for i, row in df_remaining.iterrows():
-                                        _id = row['ID']
-                                        if _id in edits:
-                                            edit_vals = edits[_id]
-                                            df_remaining.at[i, 'Weight'] = edit_vals['Weight'] if pd.notna(edit_vals['Weight']) else ""
-                                            df_remaining.at[i, 'Unit'] = edit_vals['Unit'] if pd.notna(edit_vals['Unit']) else ""
-                                            df_remaining.at[i, 'Reps'] = edit_vals['Reps'] if pd.notna(edit_vals['Reps']) else ""
-                                            df_remaining.at[i, 'RPE'] = edit_vals['RPE'] if pd.notna(edit_vals['RPE']) else ""
-                                            df_remaining.at[i, 'Set Type'] = edit_vals['Set Type'] if pd.notna(edit_vals['Set Type']) else ""
-                                            df_remaining.at[i, 'Memo'] = edit_vals['Memo'] if pd.notna(edit_vals['Memo']) else ""
-                                            
-                                    ws_log_current.clear()
-                                    headers = df_current.columns.tolist() if not df_current.empty else ["ID", "Date", "ExerciseID", "Target", "Exercise", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"]
-                                    update_data = [headers] + df_remaining.fillna("").values.tolist()
-                                    ws_log_current.update(range_name='A1', values=update_data, value_input_option='USER_ENTERED')
+                                    headers = ws_log_current.row_values(1)
+                                    requests = history_update_requests(
+                                        ws_log_current.id, headers, current_data, edits, ids_to_delete
+                                    )
+                                    if requests:
+                                        sh.batch_update({'requests': requests})
                                     
                                     st.success(f"Changes applied! (Deleted {len(ids_to_delete)}, Checked {len(edits)} for updates).")
                                     time.sleep(1)

@@ -1,2 +1,5 @@
 my-workout-app*
 .streamlit/secrets.toml
+__pycache__/
+*.py[cod]
+tests/__pycache__
