@@ -89,14 +89,27 @@ entering records so both headers and worksheet metadata are refreshed.
 
 ## Recording and analysis
 
+Log keeps exercise selection, weight/reps and Add Log above the comparison table.
+Template, muscle, date and menu search settings are collapsed by default.
+Menus do not accept typing by default, avoiding the mobile keyboard; enable
+"Enable typing to search menus" when needed. Streamlit 1.61+ is required for
+the mobile keyboard fix with `filter_mode=None`.
+
+"View history for this exercise" opens a dialog directly from Log, initially on
+the previous workout date. Choose another date or All dates and a 3-month,
+6-month or all-time range. The compact table shows date, set, recorded weight
+with its original unit, and reps; expand Details for RPE, set type and memo.
+
 Log shows the previous workout and the selected day's sets side by side in input
 order. Backdated entries compare against the last workout before that date. Weight
 and repetitions are the main inputs; the weight step is 1 in both Log and History.
 Unit, RPE, set type and memo are under More options. Saving reads back the log before
 showing success and updating the comparison table.
 
-Analysis has its own exercise selector, defaulting initially to the logging
-exercise. Choose daily progress, maximum weight or all sets, and a 3-month,
+Analysis follows the exercise selected in Log by default, including subsequent
+exercise changes. Turn off "Use exercise selected in Log" to select independently.
+Table is the default display, ordered by newest workout first with sets in input
+order. Switch to Chart for daily progress, maximum weight or all sets, and a 3-month,
 6-month or all-time range ending on the latest recorded date. Unclassified sets
 are included even when warm-ups (Up) are excluded. Daily progress uses estimated
 1RM for loaded exercises, repetitions for bodyweight exercises and minimum

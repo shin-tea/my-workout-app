@@ -3,3 +3,4 @@ my-workout-app*
 __pycache__/
 *.py[cod]
 tests/__pycache__
+.test-deps/

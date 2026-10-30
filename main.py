@@ -12,6 +12,7 @@ from workout_data import (
     analysis_records,
     collect_history_changes,
     daily_progress,
+    history_table,
     latest_exercise_record,
     normalize_id,
     prepare_log,
@@ -24,6 +25,17 @@ NO_TEMPLATE = "Select from Exercises"
 MOBILE_FORM_CSS = """
 <style>
 @media (max-width: 600px) {
+    .block-container { padding: 1rem 1rem 3rem; }
+    h1 { font-size: 1.6rem !important; }
+    button { min-height: 44px; }
+    .st-key-app_header div[data-testid="stHorizontalBlock"] {
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+    }
+    .st-key-app_header div[data-testid="stHorizontalBlock"] > div {
+        min-width: 0 !important;
+        width: auto !important;
+    }
     div[data-testid="stForm"] div[data-testid="stHorizontalBlock"] {
         flex-direction: row !important;
         flex-wrap: nowrap !important;
@@ -108,63 +120,94 @@ def filtered_exercises(exercises, muscle):
     ]
 
 
+def selectbox(*args, **kwargs):
+    """Avoid opening the mobile keyboard unless search is explicitly enabled."""
+    return st.selectbox(
+        *args, filter_mode="fuzzy" if st.session_state.get("search_selectors", False) else None,
+        **kwargs,
+    )
+
+
 def select_log_exercise(exercises, templates):
     template_map = {row["template_id"]: row for row in templates.to_dict("records")}
-    template_col, muscle_col, exercise_col = st.columns(3)
-    with template_col:
-        template_id = st.selectbox(
+    with st.expander("Template / muscle filter / date / search"):
+        st.toggle("Enable typing to search menus", key="search_selectors")
+        template_id = selectbox(
             "Use Template", [None] + list(template_map), key="template_selector",
             format_func=lambda key: NO_TEMPLATE if key is None else template_map[key]["template_name"],
         )
+        muscle = selectbox("Filter Muscle", muscle_options(exercises), key="log_muscle_filter")
+        date = st.date_input("Date", datetime.date.today(), format="YYYY/MM/DD", key="log_date")
     label = lambda key: exercise_label(exercises, key)
     if template_id is not None:
         template = template_map[template_id]
         options = template_exercises(template["exercise_ids"], exercises)
-        with muscle_col:
-            st.markdown(f"**Exercises in Template:** {len(options)}")
-        with exercise_col:
-            selected = st.selectbox(
-                "Exercise (Template Order)", options, format_func=label,
-                key=f"log_template_exercise_{template_id}",
-            )
+        selected = selectbox(
+            "Exercise (Template Order)", options, format_func=label,
+            key=f"log_template_exercise_{template_id}",
+        )
         if not options:
             st.warning("No exercises found in template")
         if template.get("memo"):
-            st.info(f"**Memo**\n\n{template['memo']}")
-        return selected
-    with muscle_col:
-        muscle = st.selectbox("Filter Muscle", muscle_options(exercises), key="log_muscle_filter")
-    with exercise_col:
-        return st.selectbox(
-            "Exercise", filtered_exercises(exercises, muscle),
-            format_func=label, key="log_ex_select_normal",
+            with st.expander("Template memo"):
+                st.write(template["memo"])
+        return selected, date
+    return selectbox(
+        "Exercise", filtered_exercises(exercises, muscle),
+        format_func=label, key="log_ex_select_normal",
+    ), date
+
+
+def render_record_table(records):
+    st.dataframe(
+        history_table(records), hide_index=True, width="stretch",
+        column_config={"Date": st.column_config.DateColumn("Date", format="YYYY/MM/DD")},
+    )
+    with st.expander("Details: unit, RPE, set type and memo"):
+        st.dataframe(
+            records.sort_values(["Date", "_Row"], ascending=[False, True])[
+                ["Date", "Weight", "Unit", "Reps", "RPE", "Set Type", "Memo"]
+            ], hide_index=True, width="stretch",
         )
+
+
+@st.dialog("Exercise history", width="large")
+def show_exercise_history(log, exercise_id, name, date):
+    st.markdown(f"**{name}**")
+    months = st.radio(
+        "Period", [3, 6, None], horizontal=True, key=f"quick_period_{exercise_id}",
+        format_func=lambda value: f"Last {value} months" if value else "All time",
+    )
+    records = analysis_records(log, exercise_id, months)
+    if records.empty:
+        st.info("No records in this period. Try All time.")
+        return
+    days = sorted(records["Date"].dt.date.unique(), reverse=True)
+    past_days = [day for day in days if day < date]
+    initial_day = past_days[0] if past_days else days[0]
+    day = selectbox(
+        "Workout date", [None] + days, index=days.index(initial_day) + 1,
+        format_func=lambda value: value.strftime("%Y/%m/%d") if value else "All dates",
+        key=f"quick_day_{exercise_id}_{months}",
+    )
+    if day is not None:
+        records = records[records["Date"].dt.date == day]
+    render_record_table(records)
 
 
 def render_log(log, exercises, templates, units, set_types, spreadsheet, master_headers):
     st.markdown("### Log")
-    exercise_id = select_log_exercise(exercises, templates)
+    exercise_id, date = select_log_exercise(exercises, templates)
     if exercise_id is None:
         return None
     exercise = exercises[exercise_id]
-    date = st.date_input("Date", datetime.date.today(), format="YYYY/MM/DD", key="log_date")
+    st.caption(f"{exercise['exercise_name']} · {date:%Y/%m/%d}")
+    if st.button("View history for this exercise", use_container_width=True):
+        show_exercise_history(log, exercise_id, exercise["exercise_name"], date)
     dated_log = log[log["Date"].dt.date <= date] if not log.empty else log
     previous = latest_exercise_record(dated_log, exercise_id)
     default_unit = previous.get("Unit", "kg")
     unit_index = units.index(default_unit) if default_unit in units else 0
-
-    comparison = set_comparison(log, exercise_id, date)
-    st.markdown("#### Previous workout / Today" if date == datetime.date.today() else "#### Previous workout / Selected day")
-    if comparison.empty:
-        st.caption("No sets yet. Add your first set below.")
-    else:
-        previous_date = comparison.attrs["previous_date"]
-        previous_label = f"Previous · {previous_date}" if previous_date else "Previous"
-        day_label = "Today" if date == datetime.date.today() else f"{date:%Y/%m/%d}"
-        st.dataframe(
-            comparison, hide_index=True, width="stretch",
-            column_config={"Previous": previous_label, "Today": day_label},
-        )
 
     with st.form("log_form"):
         weight_col, reps_col = st.columns(2)
@@ -181,9 +224,9 @@ def render_log(log, exercises, templates, units, set_types, spreadsheet, master_
         with st.expander("More options: unit, RPE, set type and memo"):
             unit_col, type_col = st.columns(2)
             with unit_col:
-                unit = st.selectbox("Unit", units, index=unit_index, key=f"unit_{exercise_id}")
+                unit = selectbox("Unit", units, index=unit_index, key=f"unit_{exercise_id}")
             with type_col:
-                set_type = st.selectbox(
+                set_type = selectbox(
                     "Set Type", set_types, index=set_types.index("Main") if "Main" in set_types else 0,
                     key=f"set_type_{exercise_id}",
                 )
@@ -208,6 +251,19 @@ def render_log(log, exercises, templates, units, set_types, spreadsheet, master_
             f"Added: {exercise['exercise_name']} ({weight}{unit} x {reps})",
             reset_keys=[f"{field}_{exercise_id}" for field in ("weight", "unit", "reps")],
         )
+    comparison = set_comparison(log, exercise_id, date)
+    st.markdown("#### Previous workout / Today" if date == datetime.date.today() else "#### Previous workout / Selected day")
+    if comparison.empty:
+        st.caption("No sets yet. Add your first set above.")
+    else:
+        previous_date = comparison.attrs["previous_date"]
+        st.dataframe(
+            comparison, hide_index=True, width="stretch", height=210,
+            column_config={
+                "Previous": f"Previous · {previous_date}" if previous_date else "Previous",
+                "Today": "Today" if date == datetime.date.today() else f"{date:%Y/%m/%d}",
+            },
+        )
     return exercise_id
 
 
@@ -227,13 +283,16 @@ def all_sets_chart(records, show_estimate=True):
 def render_analysis(log, exercises, spreadsheet, default_exercise=None):
     st.markdown("### Analysis")
     options = list(exercises)
-    exercise_id = st.selectbox(
-        "Exercise", options, index=options.index(default_exercise) if default_exercise in options else 0,
-        format_func=lambda key: exercise_label(exercises, key), key="analysis_exercise",
-    )
-    period_col, view_col = st.columns(2)
-    with period_col:
-        months = st.selectbox("Period", [3, 6, None], format_func=lambda value: f"Last {value} months" if value else "All time")
+    if default_exercise in options and st.toggle("Use exercise selected in Log", value=True):
+        exercise_id = default_exercise
+        st.caption(exercise_label(exercises, exercise_id))
+    else:
+        exercise_id = selectbox(
+            "Exercise", options, index=options.index(default_exercise) if default_exercise in options else 0,
+            format_func=lambda key: exercise_label(exercises, key), key="analysis_exercise",
+        )
+    display = st.radio("Display", ["Table", "Chart"], horizontal=True, key="analysis_display")
+    months = selectbox("Period", [3, 6, None], format_func=lambda value: f"Last {value} months" if value else "All time")
     exercise = exercises[exercise_id]
     name = exercise["exercise_name"].lower()
     assisted = "assisted" in name
@@ -243,12 +302,19 @@ def render_analysis(log, exercises, spreadsheet, default_exercise=None):
         progress_column, progress_label = "Weight (kg)", "Least assistance (kg)"
     elif bodyweight:
         progress_column, progress_label = "Reps", "Max reps"
-    with view_col:
-        view = st.selectbox("Chart", [progress_label, "Max weight (kg)", "All sets"])
+    view = None
+    if display == "Chart":
+        view = selectbox("Chart", [progress_label, "Max weight (kg)", "All sets"])
     include_warmups = st.checkbox("Include warm-up sets", value=True)
     records = analysis_records(log, exercise_id, months, include_warmups)
     if records.empty:
         st.info("No records in this period. Try All time or include warm-up sets.")
+        return
+    if display == "Table":
+        render_record_table(records)
+        st.caption(f"{len(records)} sets · Newest workouts first · Original weight units")
+        with st.expander("Exercise notes"):
+            render_notes(exercise_id, exercise, spreadsheet)
         return
     records["Set Order"] = records.groupby(records["Date"].dt.normalize()).cumcount() + 1
     if assisted:
@@ -330,7 +396,7 @@ def render_history(log, units, set_types, spreadsheet):
     months = log["Date"].dt.strftime("%Y/%m")
     available_months = sorted(months.dropna().unique(), reverse=True)
     current_month = datetime.date.today().strftime("%Y/%m")
-    month = st.selectbox(
+    month = selectbox(
         "Select Month", available_months,
         index=available_months.index(current_month) if current_month in available_months else 0,
     )
@@ -399,7 +465,7 @@ def render_template_form(exercises, spreadsheet, template=None):
             placeholder="e.g., Chest Day", key=f"{prefix}_name",
         )
     with muscle_col:
-        muscle = st.selectbox(
+        muscle = selectbox(
             "Filter Exercises by Muscle", muscle_options(exercises), key=f"{prefix}_muscle"
         )
     existing = template_exercises(template.get("exercise_ids", ""), exercises)
@@ -409,6 +475,7 @@ def render_template_form(exercises, spreadsheet, template=None):
     exercise_ids = st.multiselect(
         "Select Exercises (Order is preserved)", options, default=existing,
         format_func=lambda key: exercise_label(exercises, key), key=f"{prefix}_exercises",
+        filter_mode="fuzzy" if st.session_state.get("search_selectors", False) else None,
     )
     memo = st.text_area(
         "Template Memo", value=template.get("memo", ""), key=f"{prefix}_memo"
@@ -444,7 +511,7 @@ def render_templates(exercises, templates, spreadsheet):
     if not templates.empty:
         template_map = {row["template_id"]: row for row in templates.to_dict("records")}
         with st.expander("Edit Existing Template", expanded=False):
-            template_id = st.selectbox(
+            template_id = selectbox(
                 "Select Template", list(template_map),
                 format_func=lambda key: template_map[key]["template_name"],
                 key="edit_template_selector_tid",
@@ -488,19 +555,19 @@ def render_templates(exercises, templates, spreadsheet):
 
 def main():
     st.set_page_config(page_title="Workout Tracker", layout="wide", page_icon="💪")
-    title_col, reload_col = st.columns([5, 1])
-    title_col.title("Workout Tracker")
-    with reload_col:
-        st.markdown("<div style='margin-top: 25px;'></div>", unsafe_allow_html=True)
-        if st.button("Reload", use_container_width=True):
-            reset_history()
-            for key in list(st.session_state):
-                if key.startswith(("weight_", "unit_", "reps_")):
-                    st.session_state.pop(key)
-            sheets.clear_sheet_cache()
-            load_log.clear()
-            load_reference_data.clear()
-            st.rerun()
+    with st.container(key="app_header"):
+        title_col, reload_col = st.columns([4, 1])
+        title_col.title("Workout Tracker")
+        with reload_col:
+            if st.button("Reload", use_container_width=True):
+                reset_history()
+                for key in list(st.session_state):
+                    if key.startswith(("weight_", "unit_", "reps_")):
+                        st.session_state.pop(key)
+                sheets.clear_sheet_cache()
+                load_log.clear()
+                load_reference_data.clear()
+                st.rerun()
     st.markdown(MOBILE_FORM_CSS, unsafe_allow_html=True)
     if message := st.session_state.pop("success_msg", None):
         st.success(message)

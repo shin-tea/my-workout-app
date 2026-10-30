@@ -125,6 +125,22 @@ def daily_progress(records, column="Estimated 1RM (kg)", aggregation="max"):
     return records.groupby(records["Date"].dt.normalize())[column].agg(aggregation).reset_index()
 
 
+def history_table(records):
+    """Newest workouts first, preserving set order and recorded weight units."""
+    columns = ["Date", "Set", "Weight", "Reps"]
+    if records.empty:
+        return pd.DataFrame(columns=columns)
+    table = records.sort_values(["Date", "_Row"], kind="stable").copy()
+    table["Set"] = table.groupby(table["Date"].dt.normalize()).cumcount() + 1
+    table["Weight"] = [
+        f"{weight:g} {unit}" for weight, unit in zip(table["Weight"], table["Unit"])
+    ]
+    table["Reps"] = table["Reps"].astype(int)
+    return table.sort_values(
+        ["Date", "_Row"], ascending=[False, True], kind="stable"
+    )[columns].reset_index(drop=True)
+
+
 def template_exercise_ids(value):
     if pd.isna(value):
         return []
